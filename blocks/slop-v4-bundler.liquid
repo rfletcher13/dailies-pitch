@@ -555,7 +555,7 @@
   <dynamic-box-{{ rob_custom }}
     id="dynamic-box-component-{{ rob_custom }}"
     data-rob-custom="{{ rob_custom }}"
-    data-box-product-gid="{{ box_product_gid }}"
+    data-box-product-gid="{{ box_product_gid_for_api }}"
     data-variants-json="{{ variants_json_data | escape }}"
     data-settings="{{ block.settings | json | escape }}"
     data-currency-code="{{ cart.currency.iso_code | default: 'USD' }}"
