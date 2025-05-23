@@ -1,0 +1,1849 @@
+{% comment %}
+  IMPORTANT: This Shopify Liquid block is designed to be self-contained.
+  - It uses a Custom Element for JavaScript encapsulation.
+  - All CSS and HTML class names are namespaced using `{{ ai_gen_id }}` to prevent conflicts.
+  - The schema is comprehensive to allow for extensive customization via the Shopify Theme Customizer.
+
+  Bundle Logic:
+  1. Master Bundle Product: The merchant selects a "master bundle product" via `bundle_product_picker`.
+     The variants of this master product define the available tiers (e.g., "3 Pairs", "6 Pairs", "12 Pairs").
+     The price of the selected variant is the total price for that tier.
+     The number of items for a tier is extracted from the variant's title or a specified option using a regex
+     (e.g., if variant title is "12 Pairs", it means 12 items).
+  2. Mix & Match Items: The merchant selects a collection (`mix_match_collection`) whose products are available
+     for the user to choose from to fill their bundle.
+  3. User Interaction:
+     - User selects a tier (e.g., "12 Pairs" for $43.20 total).
+     - User then selects 12 individual product variants from the mix & match collection.
+     - Each selected item from the mix & match collection is assumed to be 1 unit/pair.
+  4. Pricing Display:
+     - "Price per pair" for a tier is calculated as `tier_variant.price / number_of_items_in_tier`.
+     - "Subtotal" (discounted price) is calculated as `(items_currently_selected / items_in_tier) * tier_variant.price`.
+     - "Original Subtotal" (strikethrough) is the sum of the regular prices of the `items_currently_selected`.
+     - Savings percentage is derived from these two subtotals.
+  5. Add to Cart:
+     - The selected variant of the "master bundle product" is added to the cart.
+     - The chosen mix & match items (their IDs, titles, quantities) are added as line item properties
+       to this master bundle product variant. This ensures the correct bundle price is charged.
+{% endcomment %}
+
+{% doc %}
+  @prompt
+  The user wants a Shopify Liquid block based on a provided image. The block should allow customers to build a product bundle.
+
+  Functional Requirements:
+  1.  **Select Quantity (Tiers):**
+      *   Defined by variants of a merchant-selected "master bundle product".
+      *   Each tier shows a label (e.g., "12 Pairs" from variant title), and a calculated price per item (e.g., "$3.60 / pair").
+      *   One tier can be marked as "BEST DEAL" (lowest price per item, or specified by merchant).
+      *   A global "1 Pair Per Pack" label (configurable).
+      *   The number of items in a tier (e.g., 12) is extracted from the variant title/option using a regex.
+  2.  **Mix & Match Products:**
+      *   Products sourced from a merchant-selected collection.
+      *   Filter bar (e.g., "All", "Best Sellers", "Soft") based on product tags. Filter definitions via JSON setting.
+      *   A counter for remaining items to add (e.g., "4 Pairs to Go").
+      *   List of products, each with:
+          *   Image thumbnail (`product.featured_image`).
+          *   Product Title (`product.title`).
+          *   Short description (configurable, can use `product.description` or a snippet).
+          *   "Add +" button, changes to a quantity indicator ("- 1 +") if added. Assumes 1 unit of each selected product variant.
+          *   Badges like "BEST SELLER" or "NEW ARRIVAL" (configurable text, potentially driven by tags or metafields if extended). For this version, simple text badges.
+      *   "Scroll for more styles" indicator. The product list should be scrollable if it exceeds a certain height.
+  3.  **"Can't Choose? Try our 3 Best Sellers!" (Suggestion Box):**
+      *   Optional section.
+      *   Title, image, pack title, description, and a "Shop" button linking to a URL (e.g., a pre-defined bundle or collection).
+  4.  **Subtotal Section:**
+      *   Shows a crossed-out original subtotal (sum of regular prices of selected items).
+      *   Shows a final discounted subtotal (pro-rated based on the selected tier's price and number of items picked).
+      *   A "You're Saving X%" message.
+  5.  **Add to Cart Button:**
+      *   Adds the chosen variant of the "master bundle product" to the cart.
+      *   Selected mix & match items are passed as line item properties.
+  6.  **Delivery Information:**
+      *   Configurable text lines (e.g., "Delivered by Apr 4", "FREE Shipping over $50"). Date part may need dynamic JS if precise.
+  7.  **Returns Guarantee:**
+      *   Icon and configurable text.
+  8.  **Pricing:**
+      *   Prices and compare-at prices for individual mix & match items are pulled from their Shopify variant data.
+      *   The bundle tier pricing comes from the variants of the master bundle product.
+
+  Styling Considerations:
+  *   Mimic the visual style of the provided image (layout, fonts, colors, spacing, rounded corners).
+  *   All styling elements (colors, fonts, spacing, borders) should be configurable via Shopify schema settings.
+  *   Responsive design.
+  *   Custom scrollbar for the product list.
+
+  UX Specifications:
+  *   Interactive tier selection.
+  *   Dynamic updates to "X Pairs to Go", subtotals, and savings percentage.
+  *   Smooth adding/removing of products.
+  *   Filtering of mix & match products.
+  *   "Add to Cart" button enabled only when the correct number of items for the selected tier is chosen.
+
+  Metafield Dependencies (for this version, keeping it simpler, but could be extended):
+  *   Number of items in a tier extracted from master bundle product's variant title/option via regex.
+  *   Product tags for filtering.
+  *   Optional: product tags for "BEST SELLER" / "NEW ARRIVAL" badges (simplified to text settings for now).
+
+  Schema:
+  *   Extremely detailed and comprehensive for granular control.
+  *   Logical grouping of settings using headers.
+  *   Settings for all texts, colors, spacing, layout options, and functional parameters.
+{% enddoc %}
+
+{% assign ai_gen_id = block.id | replace: '_', '' | downcase %}
+
+{% liquid
+  assign master_bundle_product = block.settings.bundle_product_picker
+  assign mix_match_collection = block.settings.mix_match_collection
+
+  assign filter_buttons_json = block.settings.filter_buttons_json | default: '[]'
+  assign filter_buttons = filter_buttons_json | parse_json
+
+  assign suggestion_image = block.settings.suggestion_image
+  assign returns_icon_svg = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM16.243 8.353L11.293 13.303L8.464 10.474L7.05 11.889L11.293 16.131L17.657 9.767L16.243 8.353Z" fill="currentColor"/></svg>'
+  if block.settings.returns_icon != blank
+    assign returns_icon_svg = block.settings.returns_icon | image_url: width: 48 | image_tag: class: 'return-icon-img-' | replace: '<img', '<svg width="24" height="24" viewbox="0 0 24 24" fill="currentColor" class="return-icon-img-'
+  endif
+%}
+
+{% style %}
+  .product-bundle-builder-{{ ai_gen_id }} {
+    background-color: {{ block.settings.background_color }};
+    padding: {{ block.settings.padding_top | default: 20 }}px {{ block.settings.padding_right | default: 15 }}px {{ block.settings.padding_bottom | default: 20 }}px {{ block.settings.padding_left | default: 15 }}px;
+    border-radius: {{ block.settings.container_border_radius | default: 12 }}px;
+    font-family: {{ block.settings.font_family | default: 'inherit' }};
+    max-width: 420px; /* Max width similar to image */
+    margin: 0 auto;
+    color: {{ block.settings.text_color_general }};
+  }
+
+  .section-title-{{ ai_gen_id }} {
+    font-size: {{ block.settings.section_title_font_size | default: 16 }}px;
+    font-weight: {{ block.settings.section_title_font_weight | default: 'bold' }};
+    color: {{ block.settings.section_title_color }};
+    margin-bottom: {{ block.settings.section_title_margin_bottom | default: 10 }}px;
+    display: flex;
+    align-items: center;
+  }
+  .section-title-{{ ai_gen_id }} .step-number-{{ ai_gen_id }} {
+    background-color: {{ block.settings.step_number_bg_color }};
+    color: {{ block.settings.step_number_text_color }};
+    border-radius: 50%;
+    width: {{ block.settings.step_number_size | default: 20 }}px;
+    height: {{ block.settings.step_number_size | default: 20 }}px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: {{ block.settings.step_number_font_size | default: 12 }}px;
+    font-weight: bold;
+    margin-right: 8px;
+  }
+
+  /* Quantity Selector */
+  .quantity-selector-header-{{ ai_gen_id }} {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: {{ block.settings.quantity_selector_header_margin_bottom | default: 8 }}px;
+  }
+  .pack-info-text-{{ ai_gen_id }} {
+    font-size: {{ block.settings.pack_info_font_size | default: 10 }}px;
+    color: {{ block.settings.pack_info_text_color }};
+    background-color: {{ block.settings.pack_info_bg_color }};
+    padding: 2px 6px;
+    border-radius: {{ block.settings.pack_info_border_radius | default: 4 }}px;
+  }
+  .tier-options-{{ ai_gen_id }} {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax({{ block.settings.tier_button_min_width | default: 100 }}px, 1fr));
+    gap: {{ block.settings.tier_button_gap | default: 8 }}px;
+    margin-bottom: {{ block.settings.main_sections_gap | default: 20 }}px;
+  }
+  .tier-button-{{ ai_gen_id }} {
+    background-color: {{ block.settings.tier_button_bg_color }};
+    color: {{ block.settings.tier_button_text_color }};
+    border: 1px solid {{ block.settings.tier_button_border_color }};
+    padding: {{ block.settings.tier_button_padding_y | default: 10 }}px {{ block.settings.tier_button_padding_x | default: 10 }}px;
+    border-radius: {{ block.settings.tier_button_border_radius | default: 8 }}px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    position: relative;
+  }
+  .tier-button-{{ ai_gen_id }}.selected-{{ ai_gen_id }} {
+    background-color: {{ block.settings.tier_button_selected_bg_color }};
+    color: {{ block.settings.tier_button_selected_text_color }};
+    border-color: {{ block.settings.tier_button_selected_border_color }};
+    box-shadow: 0 0 0 2px {{ block.settings.tier_button_selected_border_color }};
+  }
+  .tier-button-{{ ai_gen_id }}:hover:not(.selected-{{ ai_gen_id }}) {
+    border-color: {{ block.settings.tier_button_hover_border_color }};
+  }
+  .tier-label-{{ ai_gen_id }} {
+    font-size: {{ block.settings.tier_label_font_size | default: 14 }}px;
+    font-weight: bold;
+    display: block;
+  }
+  .tier-price-per-item-{{ ai_gen_id }} {
+    font-size: {{ block.settings.tier_price_font_size | default: 12 }}px;
+    color: {{ block.settings.tier_price_text_color }};
+    display: block;
+  }
+  .tier-button-{{ ai_gen_id }}.selected-{{ ai_gen_id }} .tier-price-per-item-{{ ai_gen_id }} {
+    color: {{ block.settings.tier_price_selected_text_color | default: block.settings.tier_button_selected_text_color }};
+  }
+  .best-deal-badge-{{ ai_gen_id }} {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: {{ block.settings.best_deal_badge_bg_color }};
+    color: {{ block.settings.best_deal_badge_text_color }};
+    font-size: {{ block.settings.best_deal_badge_font_size | default: 10 }}px;
+    padding: 2px 8px;
+    border-radius: {{ block.settings.best_deal_badge_border_radius | default: 4 }}px;
+    font-weight: bold;
+    white-space: nowrap;
+  }
+
+  /* Mix & Match Products */
+  .mix-match-header-{{ ai_gen_id }} {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: {{ block.settings.mix_match_header_margin_bottom | default: 10 }}px;
+  }
+  .items-to-go-{{ ai_gen_id }} {
+    font-size: {{ block.settings.items_to_go_font_size | default: 12 }}px;
+    color: {{ block.settings.items_to_go_text_color }};
+    background-color: {{ block.settings.items_to_go_bg_color }};
+    padding: 4px 8px;
+    border-radius: {{ block.settings.items_to_go_border_radius | default: 4 }}px;
+    font-weight: 500;
+  }
+  .filter-bar-{{ ai_gen_id }} {
+    display: flex;
+    gap: {{ block.settings.filter_button_gap | default: 8 }}px;
+    margin-bottom: {{ block.settings.filter_bar_margin_bottom | default: 15 }}px;
+    overflow-x: auto;
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .filter-bar-{{ ai_gen_id }}::-webkit-scrollbar { /* Chrome, Safari, Opera */
+    display: none;
+  }
+  .filter-button-{{ ai_gen_id }} {
+    background-color: {{ block.settings.filter_button_bg_color }};
+    color: {{ block.settings.filter_button_text_color }};
+    border: 1px solid {{ block.settings.filter_button_border_color }};
+    padding: {{ block.settings.filter_button_padding_y | default: 6 }}px {{ block.settings.filter_button_padding_x | default: 12 }}px;
+    border-radius: {{ block.settings.filter_button_border_radius | default: 16 }}px;
+    font-size: {{ block.settings.filter_button_font_size | default: 13 }}px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    white-space: nowrap;
+  }
+  .filter-button-{{ ai_gen_id }}.active-{{ ai_gen_id }} {
+    background-color: {{ block.settings.filter_button_active_bg_color }};
+    color: {{ block.settings.filter_button_active_text_color }};
+    border-color: {{ block.settings.filter_button_active_border_color }};
+  }
+  .product-list-{{ ai_gen_id }} {
+    max-height: {{ block.settings.product_list_max_height | default: 300 }}px;
+    overflow-y: auto;
+    padding-right: 8px; /* Space for scrollbar */
+    margin-bottom: {{ block.settings.main_sections_gap | default: 20 }}px;
+    position: relative;
+  }
+  /* Custom Scrollbar */
+  .product-list-{{ ai_gen_id }}::-webkit-scrollbar {
+    width: {{ block.settings.scrollbar_width | default: 6 }}px;
+  }
+  .product-list-{{ ai_gen_id }}::-webkit-scrollbar-track {
+    background: {{ block.settings.scrollbar_track_color | default: '#f1f1f1' }};
+    border-radius: {{ block.settings.scrollbar_width | default: 6 }}px;
+  }
+  .product-list-{{ ai_gen_id }}::-webkit-scrollbar-thumb {
+    background: {{ block.settings.scrollbar_thumb_color | default: '#888' }};
+    border-radius: {{ block.settings.scrollbar_width | default: 6 }}px;
+  }
+  .product-list-{{ ai_gen_id }}::-webkit-scrollbar-thumb:hover {
+    background: {{ block.settings.scrollbar_thumb_hover_color | default: '#555' }};
+  }
+
+  .product-card-{{ ai_gen_id }} {
+    display: flex;
+    align-items: center;
+    padding: {{ block.settings.product_card_padding_y | default: 10 }}px {{ block.settings.product_card_padding_x | default: 0 }};
+    border-bottom: 1px solid {{ block.settings.product_card_divider_color }};
+    gap: 12px;
+  }
+  .product-card-{{ ai_gen_id }}:last-child {
+    border-bottom: none;
+  }
+  .product-image-wrapper-{{ ai_gen_id }} {
+    width: {{ block.settings.product_image_size | default: 60 }}px;
+    height: {{ block.settings.product_image_size | default: 60 }}px;
+    border-radius: {{ block.settings.product_image_border_radius | default: 8 }}px;
+    overflow: hidden;
+    background-color: {{ block.settings.product_image_bg_placeholder | default: '#f0f0f0' }};
+    flex-shrink: 0;
+  }
+  .product-image-wrapper-{{ ai_gen_id }} img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .product-info-{{ ai_gen_id }} {
+    flex-grow: 1;
+  }
+  .product-title-{{ ai_gen_id }} {
+    font-size: {{ block.settings.product_title_font_size | default: 14 }}px;
+    font-weight: {{ block.settings.product_title_font_weight | default: '500' }};
+    color: {{ block.settings.product_title_color }};
+    margin-bottom: 4px;
+  }
+  .product-description-{{ ai_gen_id }} {
+    font-size: {{ block.settings.product_desc_font_size | default: 12 }}px;
+    color: {{ block.settings.product_desc_color }};
+    margin-bottom: 6px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .product-badges-{{ ai_gen_id }} {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px; /* If description is short or absent */
+  }
+  .product-badge-{{ ai_gen_id }} {
+    font-size: {{ block.settings.product_badge_font_size | default: 10 }}px;
+    padding: 2px 6px;
+    border-radius: {{ block.settings.product_badge_border_radius | default: 4 }}px;
+    font-weight: 500;
+  }
+  .badge-best-seller-{{ ai_gen_id }} {
+    background-color: {{ block.settings.badge_bs_bg_color }};
+    color: {{ block.settings.badge_bs_text_color }};
+  }
+  .badge-new-arrival-{{ ai_gen_id }} {
+    background-color: {{ block.settings.badge_na_bg_color }};
+    color: {{ block.settings.badge_na_text_color }};
+  }
+
+  .product-action-{{ ai_gen_id }} {
+    flex-shrink: 0;
+  }
+  .add-product-btn-{{ ai_gen_id }}, .product-quantity-control-{{ ai_gen_id }} button {
+    background-color: {{ block.settings.product_add_btn_bg_color }};
+    color: {{ block.settings.product_add_btn_text_color }};
+    border: 1px solid {{ block.settings.product_add_btn_border_color | default: 'transparent' }};
+    border-radius: {{ block.settings.product_add_btn_border_radius | default: 20 }}px;
+    padding: {{ block.settings.product_add_btn_padding_y | default: 8 }}px {{ block.settings.product_add_btn_padding_x | default: 15 }}px;
+    font-size: {{ block.settings.product_add_btn_font_size | default: 13 }}px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+  .add-product-btn-{{ ai_gen_id }}:hover {
+    background-color: {{ block.settings.product_add_btn_hover_bg_color }};
+  }
+  .product-quantity-control-{{ ai_gen_id }} {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: {{ block.settings.product_qty_bg_color }};
+    border-radius: {{ block.settings.product_add_btn_border_radius | default: 20 }}px;
+    padding: 4px;
+  }
+  .product-quantity-control-{{ ai_gen_id }} button {
+    background-color: {{ block.settings.product_qty_btn_bg_color }};
+    color: {{ block.settings.product_qty_btn_text_color }};
+    width: {{ block.settings.product_qty_btn_size | default: 28 }}px;
+    height: {{ block.settings.product_qty_btn_size | default: 28 }}px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    border: none;
+  }
+   .product-quantity-control-{{ ai_gen_id }} button:hover {
+    background-color: {{ block.settings.product_qty_btn_hover_bg_color }};
+  }
+  .product-quantity-control-{{ ai_gen_id }} .qty-display-{{ ai_gen_id }} {
+    font-size: {{ block.settings.product_qty_font_size | default: 14 }}px;
+    font-weight: bold;
+    color: {{ block.settings.product_qty_text_color }};
+    min-width: 10px;
+    text-align: center;
+  }
+
+  .scroll-more-indicator-{{ ai_gen_id }} {
+    background-color: {{ block.settings.scroll_more_bg_color }};
+    color: {{ block.settings.scroll_more_text_color }};
+    text-align: center;
+    padding: {{ block.settings.scroll_more_padding_y | default: 8 }}px;
+    font-size: {{ block.settings.scroll_more_font_size | default: 12 }}px;
+    border-radius: 0 0 {{ block.settings.container_border_radius | default: 12 }}px {{ block.settings.container_border_radius | default: 12 }}px; /* Assuming it's at bottom of list */
+    position: sticky;
+    bottom: 0;
+    z-index: 1; /* Check if needed if list has other positioned elements */
+  }
+  .scroll-more-indicator-{{ ai_gen_id }} .icon-down-{{ ai_gen_id }} {
+    margin-left: 4px;
+    display: inline-block;
+    transform: translateY(1px);
+  }
+
+  /* Suggestion Box */
+  .suggestion-box-{{ ai_gen_id }} {
+    background-color: {{ block.settings.suggestion_bg_color }};
+    padding: {{ block.settings.suggestion_padding | default: 15 }}px;
+    border-radius: {{ block.settings.suggestion_border_radius | default: 8 }}px;
+    margin-bottom: {{ block.settings.main_sections_gap | default: 20 }}px;
+    border: 1px solid {{ block.settings.suggestion_border_color | default: 'transparent' }};
+  }
+  .suggestion-box-title-{{ ai_gen_id }} {
+    font-size: {{ block.settings.suggestion_box_title_fs | default: 16 }}px;
+    font-weight: {{ block.settings.suggestion_box_title_fw | default: 'bold' }};
+    color: {{ block.settings.suggestion_box_title_color }};
+    margin-bottom: 10px;
+  }
+  .suggestion-content-{{ ai_gen_id }} {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+  }
+  .suggestion-image-wrapper-{{ ai_gen_id }} {
+    width: {{ block.settings.suggestion_image_size | default: 70 }}px;
+    height: {{ block.settings.suggestion_image_size | default: 70 }}px;
+    border-radius: {{ block.settings.suggestion_image_border_radius | default: 8 }}px;
+    overflow: hidden;
+    background-color: {{ block.settings.product_image_bg_placeholder | default: '#f0f0f0' }};
+    flex-shrink: 0;
+    position: relative;
+  }
+  .suggestion-image-wrapper-{{ ai_gen_id }} img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .suggestion-info-icon-{{ ai_gen_id }} {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    background-color: {{ block.settings.suggestion_info_icon_bg | default: 'rgba(0,0,0,0.5)' }};
+    color: {{ block.settings.suggestion_info_icon_color | default: '#fff' }};
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-style: italic;
+    font-weight: bold;
+  }
+
+  .suggestion-text-{{ ai_gen_id }} {
+    flex-grow: 1;
+  }
+  .suggestion-pack-title-{{ ai_gen_id }} {
+    font-size: {{ block.settings.suggestion_pack_title_fs | default: 14 }}px;
+    font-weight: {{ block.settings.suggestion_pack_title_fw | default: 'bold' }};
+    color: {{ block.settings.suggestion_pack_title_color }};
+    margin-bottom: 4px;
+  }
+  .suggestion-pack-description-{{ ai_gen_id }} {
+    font-size: {{ block.settings.suggestion_pack_desc_fs | default: 12 }}px;
+    color: {{ block.settings.suggestion_pack_desc_color }};
+    margin-bottom: 8px;
+  }
+  .suggestion-shop-btn-{{ ai_gen_id }} {
+    background-color: {{ block.settings.suggestion_btn_bg_color }};
+    color: {{ block.settings.suggestion_btn_text_color }};
+    border: 1px solid {{ block.settings.suggestion_btn_border_color | default: 'transparent' }};
+    border-radius: {{ block.settings.suggestion_btn_border_radius | default: 6 }}px;
+    padding: {{ block.settings.suggestion_btn_padding_y | default: 8 }}px {{ block.settings.suggestion_btn_padding_x | default: 15 }}px;
+    font-size: {{ block.settings.suggestion_btn_font_size | default: 13 }}px;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+    transition: background-color 0.2s;
+  }
+  .suggestion-shop-btn-{{ ai_gen_id }}:hover {
+    background-color: {{ block.settings.suggestion_btn_hover_bg_color }};
+  }
+
+  /* Subtotal Section */
+  .subtotal-section-{{ ai_gen_id }} {
+    margin-bottom: {{ block.settings.subtotal_margin_bottom | default: 15 }}px;
+    padding-top: {{ block.settings.subtotal_padding_top | default: 15 }}px;
+    border-top: 1px solid {{ block.settings.subtotal_divider_color | default: '#e0e0e0' }};
+  }
+  .subtotal-line-{{ ai_gen_id }} {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: {{ block.settings.subtotal_label_fs | default: 18 }}px;
+    font-weight: {{ block.settings.subtotal_label_fw | default: 'bold' }};
+    color: {{ block.settings.subtotal_label_color }};
+  }
+  .subtotal-prices-{{ ai_gen_id }} {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .original-price-{{ ai_gen_id }} {
+    text-decoration: line-through;
+    font-size: {{ block.settings.subtotal_original_price_fs | default: 14 }}px;
+    color: {{ block.settings.subtotal_original_price_color }};
+    font-weight: {{ block.settings.subtotal_original_price_fw | default: 'normal' }};
+  }
+  .final-price-{{ ai_gen_id }} {
+    font-size: {{ block.settings.subtotal_final_price_fs | default: 18 }}px;
+    font-weight: {{ block.settings.subtotal_final_price_fw | default: 'bold' }};
+    color: {{ block.settings.subtotal_final_price_color }};
+  }
+  .savings-info-{{ ai_gen_id }} {
+    text-align: right;
+    font-size: {{ block.settings.savings_info_fs | default: 12 }}px;
+    color: {{ block.settings.savings_info_color }};
+    background-color: {{ block.settings.savings_info_bg_color }};
+    padding: {{ block.settings.savings_info_padding_y | default: 2 }}px {{ block.settings.savings_info_padding_x | default: 6 }}px;
+    border-radius: {{ block.settings.savings_info_border_radius | default: 4 }}px;
+    display: inline-block;
+    margin-top: 4px;
+    float: right; /* To align with prices */
+    clear: both;
+  }
+
+  /* Add to Cart Button */
+  .add-to-cart-btn-{{ ai_gen_id }} {
+    background-color: {{ block.settings.atc_button_bg_color }};
+    color: {{ block.settings.atc_button_text_color }};
+    border: 1px solid {{ block.settings.atc_button_border_color | default: 'transparent' }};
+    width: 100%;
+    padding: {{ block.settings.atc_button_padding_y | default: 12 }}px {{ block.settings.atc_button_padding_x | default: 20 }}px;
+    font-size: {{ block.settings.atc_button_font_size | default: 16 }}px;
+    font-weight: {{ block.settings.atc_button_font_weight | default: 'bold' }};
+    border-radius: {{ block.settings.atc_button_border_radius | default: 8 }}px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-bottom: {{ block.settings.atc_button_margin_bottom | default: 15 }}px;
+  }
+  .add-to-cart-btn-{{ ai_gen_id }}:hover:not(:disabled) {
+    background-color: {{ block.settings.atc_button_hover_bg_color }};
+  }
+  .add-to-cart-btn-{{ ai_gen_id }}:disabled {
+    background-color: {{ block.settings.atc_button_disabled_bg_color }};
+    color: {{ block.settings.atc_button_disabled_text_color }};
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  /* Delivery & Returns Info */
+  .delivery-info-{{ ai_gen_id }}, .returns-info-{{ ai_gen_id }} {
+    font-size: {{ block.settings.info_text_font_size | default: 12 }}px;
+    color: {{ block.settings.info_text_color }};
+    margin-bottom: 8px;
+  }
+  .delivery-info-{{ ai_gen_id }} .icon-{{ ai_gen_id }} {
+    color: {{ block.settings.delivery_dot_color }};
+    margin-right: 6px;
+    font-size: 18px; /* For ● */
+    line-height: 1;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .delivery-info-{{ ai_gen_id }} .shipping-icon-{{ ai_gen_id }} {
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  .returns-info-{{ ai_gen_id }} {
+    background-color: {{ block.settings.returns_bg_color }};
+    border: 1px solid {{ block.settings.returns_border_color }};
+    padding: {{ block.settings.returns_padding | default: 12 }}px;
+    border-radius: {{ block.settings.returns_border_radius | default: 8 }}px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .returns-icon-wrapper-{{ ai_gen_id }} {
+    color: {{ block.settings.returns_icon_color }};
+    flex-shrink: 0;
+  }
+  .returns-icon-wrapper-{{ ai_gen_id }} svg,
+  .returns-icon-wrapper-{{ ai_gen_id }} .return-icon-img-{{ ai_gen_id }} {
+    width: {{ block.settings.returns_icon_size | default: 28 }}px;
+    height: {{ block.settings.returns_icon_size | default: 28 }}px;
+    display: block;
+  }
+  .returns-text-{{ ai_gen_id }} p {
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .hidden-{{ ai_gen_id }} {
+    display: none !important;
+  }
+
+  /* Message Area */
+  .message-area-{{ ai_gen_id }} {
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: {{ block.settings.container_border_radius | default: 12 }}px;
+    font-size: 13px;
+    text-align: center;
+  }
+  .message-area-{{ ai_gen_id }}.error-{{ ai_gen_id }} {
+    background-color: #ffebee; /* Example error color */
+    color: #c62828;
+    border: 1px solid #c62828;
+  }
+  .message-area-{{ ai_gen_id }}.success-{{ ai_gen_id }} {
+    background-color: #e8f5e9; /* Example success color */
+    color: #2e7d32;
+    border: 1px solid #2e7d32;
+  }
+
+
+{% endstyle %}
+
+<product-bundle-builder-{{ ai_gen_id }}
+  class="product-bundle-builder-{{ ai_gen_id }}"
+  {{ block.shopify_attributes }}
+  data-ai-id="{{ ai_gen_id }}"
+  data-bundle-product-handle="{{ master_bundle_product.handle | default: '' }}"
+  data-tier-item-count-regex="{{ block.settings.tier_item_count_regex | escape }}"
+  data-best-deal-variant-title="{{ block.settings.best_deal_variant_title | escape }}"
+  data-money-format="{{ cart.currency.symbol }}{{ '%s' }}"
+  data-shop-locale="{{ request.locale.iso_code }}"
+>
+  {% if master_bundle_product == blank or master_bundle_product.variants.size == 0 %}
+    <p class="message-area-{{ ai_gen_id }} error-{{ ai_gen_id }}">{{ 'liquid.custom.bundle_product_missing' | t }}</p>
+  {% else %}
+    <!-- 1. Select Quantity -->
+    <div class="quantity-selector-{{ ai_gen_id }}">
+      <div class="quantity-selector-header-{{ ai_gen_id }}">
+        <h2 class="section-title-{{ ai_gen_id }}">
+          <span class="step-number-{{ ai_gen_id }}">1</span>{{ block.settings.title_select_quantity }}
+        </h2>
+        {% if block.settings.global_pack_info_text != blank %}
+          <span class="pack-info-text-{{ ai_gen_id }}">{{ block.settings.global_pack_info_text }}</span>
+        {% endif %}
+      </div>
+      <div class="tier-options-{{ ai_gen_id }}">
+        {% comment %} Tier buttons will be populated by JavaScript {% endcomment %}
+      </div>
+    </div>
+
+    <!-- 2. Mix & Match Products -->
+    <div class="mix-match-section-{{ ai_gen_id }} hidden-{{ ai_gen_id }}">
+      <div class="mix-match-header-{{ ai_gen_id }}">
+        <h2 class="section-title-{{ ai_gen_id }}">
+          <span class="step-number-{{ ai_gen_id }}">2</span>{{ block.settings.title_mix_match }}
+        </h2>
+        <span class="items-to-go-{{ ai_gen_id }}"></span>
+      </div>
+
+      {% if filter_buttons.size > 0 %}
+        <div class="filter-bar-{{ ai_gen_id }}">
+          {% for filter in filter_buttons %}
+            <button type="button"
+              class="filter-button-{{ ai_gen_id }} {% if filter.is_default %}active-{{ ai_gen_id }}{% endif %}"
+              data-tag="{{ filter.tag | escape }}">
+              {{ filter.label | escape }}
+              {% if filter.tag == '*' or filter.tag == '' %}
+                <span class="filter-count-{{ ai_gen_id }}"></span>
+              {% endif %}
+            </button>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if mix_match_collection != blank and mix_match_collection.products.size > 0 %}
+        <div class="product-list-{{ ai_gen_id }}">
+          {% for product_item in mix_match_collection.products %}
+            {%- assign current_variant = product_item.selected_or_first_available_variant -%}
+            {% if current_variant.available %}
+              <div class="product-card-{{ ai_gen_id }}"
+                   data-product-id="{{ product_item.id }}"
+                   data-variant-id="{{ current_variant.id }}"
+                   data-product-handle="{{ product_item.handle }}"
+                   data-product-title="{{ product_item.title | escape }}"
+                   data-variant-price="{{ current_variant.price }}"
+                   data-variant-compare-at-price="{{ current_variant.compare_at_price | default: current_variant.price }}"
+                   data-product-tags="{{ product_item.tags | join: ',' | escape }}">
+                <div class="product-image-wrapper-{{ ai_gen_id }}">
+                  {% if product_item.featured_image != blank %}
+                    <img src="{{ product_item.featured_image | image_url: width: 120, height: 120, crop: 'center' }}"
+                         alt="{{ product_item.featured_image.alt | escape }}"
+                         loading="lazy"
+                         width="60" height="60">
+                  {% else %}
+                    {{ 'product-1' | placeholder_svg_tag: 'placeholder-svg' }}
+                  {% endif %}
+                </div>
+                <div class="product-info-{{ ai_gen_id }}">
+                  <h3 class="product-title-{{ ai_gen_id }}">{{ product_item.title }}</h3>
+                  {% assign product_desc_source = block.settings.product_description_source %}
+                  {% if product_desc_source == 'product_description' and product_item.description != blank %}
+                    <p class="product-description-{{ ai_gen_id }}">{{ product_item.description | strip_html | truncate: 80 }}</p>
+                  {% elsif product_desc_source == 'custom_text' and block.settings.product_custom_description != blank %}
+                     <p class="product-description-{{ ai_gen_id }}">{{ block.settings.product_custom_description }}</p>
+                  {% endif %}
+
+                  <div class="product-badges-{{ ai_gen_id }}">
+                    {% if block.settings.show_best_seller_badge and product_item.tags contains block.settings.best_seller_tag %}
+                       <span class="product-badge-{{ ai_gen_id }} badge-best-seller-{{ ai_gen_id }}">{{ block.settings.best_seller_badge_text }}</span>
+                    {% endif %}
+                     {% if block.settings.show_new_arrival_badge and product_item.tags contains block.settings.new_arrival_tag %}
+                       <span class="product-badge-{{ ai_gen_id }} badge-new-arrival-{{ ai_gen_id }}">{{ block.settings.new_arrival_badge_text }}</span>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="product-action-{{ ai_gen_id }}">
+                  <button type="button" class="add-product-btn-{{ ai_gen_id }}" data-action="add">
+                    {{ block.settings.product_add_button_text }} +
+                  </button>
+                  <div class="product-quantity-control-{{ ai_gen_id }} hidden-{{ ai_gen_id }}">
+                    <button type="button" data-action="decrease" aria-label="{{ 'general.accessibility.decrease_quantity' | t }}">-</button>
+                    <span class="qty-display-{{ ai_gen_id }}">1</span>
+                    <button type="button" data-action="increase" aria-label="{{ 'general.accessibility.increase_quantity' | t }}" disabled>+</button> {% comment %} Increase disabled as we assume 1 of each type {% endcomment %}
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        {% if mix_match_collection.products.size > 5 %} {% comment %} Arbitrary number to show scroll indicator {% endcomment %}
+           <div class="scroll-more-indicator-{{ ai_gen_id }}">
+             {{ block.settings.scroll_more_text }}
+             <span class="icon-down-{{ ai_gen_id }}">{% render 'icon-chevron-down' %}</span>
+           </div>
+        {% endif %}
+      {% else %}
+        <p>{{ 'liquid.custom.mix_match_collection_empty' | t }}</p>
+      {% endif %}
+    </div>
+
+    <!-- 3. Can't Choose? Suggestion Box -->
+    {% if block.settings.show_suggestion_box %}
+      <div class="suggestion-box-{{ ai_gen_id }}">
+        <h3 class="suggestion-box-title-{{ ai_gen_id }}">{{ block.settings.suggestion_title }}</h3>
+        <div class="suggestion-content-{{ ai_gen_id }}">
+          <div class="suggestion-image-wrapper-{{ ai_gen_id }}">
+            {% if suggestion_image != blank %}
+              <img src="{{ suggestion_image | image_url: width: 140, height: 140, crop: 'center' }}"
+                   alt="{{ suggestion_image.alt | default: block.settings.suggestion_pack_title | escape }}"
+                   loading="lazy"
+                   width="70" height="70">
+            {% else %}
+              {{ 'product-2' | placeholder_svg_tag: 'placeholder-svg' }}
+            {% endif %}
+            {% if block.settings.suggestion_info_icon_text != blank %}
+              <span class="suggestion-info-icon-{{ ai_gen_id }}">{{ block.settings.suggestion_info_icon_text }}</span>
+            {% endif %}
+          </div>
+          <div class="suggestion-text-{{ ai_gen_id }}">
+            <h4 class="suggestion-pack-title-{{ ai_gen_id }}">{{ block.settings.suggestion_pack_title }}</h4>
+            {% if block.settings.suggestion_pack_description != blank %}
+              <div class="suggestion-pack-description-{{ ai_gen_id }}">{{ block.settings.suggestion_pack_description }}</div>
+            {% endif %}
+            {% if block.settings.suggestion_button_text != blank and block.settings.suggestion_button_link != blank %}
+              <a href="{{ block.settings.suggestion_button_link }}" class="suggestion-shop-btn-{{ ai_gen_id }}">
+                {{ block.settings.suggestion_button_text }}
+              </a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <!-- 4. Subtotal Section -->
+    <div class="subtotal-section-{{ ai_gen_id }} hidden-{{ ai_gen_id }}">
+      <div class="subtotal-line-{{ ai_gen_id }}">
+        <span>{{ block.settings.subtotal_label }}</span>
+        <div class="subtotal-prices-{{ ai_gen_id }}">
+          <span class="original-price-{{ ai_gen_id }}"></span>
+          <span class="final-price-{{ ai_gen_id }}"></span>
+        </div>
+      </div>
+      <div class="savings-info-{{ ai_gen_id }} hidden-{{ ai_gen_id }}"></div>
+    </div>
+
+    <!-- 5. Add to Cart Button -->
+    <button type="button" class="add-to-cart-btn-{{ ai_gen_id }}" disabled>
+      {{ block.settings.add_to_cart_button_text }}
+    </button>
+    <div class="message-area-{{ ai_gen_id }} hidden-{{ ai_gen_id }}"></div>
+
+
+    <!-- 6. Delivery Information -->
+    {% if block.settings.show_delivery_info %}
+      <div class="delivery-info-{{ ai_gen_id }}">
+        {% if block.settings.delivery_text_line1 != blank %}
+          <p><span class="icon-{{ ai_gen_id }}">●</span> {{ block.settings.delivery_text_line1 }}</p>
+        {% endif %}
+        {% if block.settings.delivery_text_line2 != blank %}
+          <p>
+            <span class="shipping-icon-{{ ai_gen_id }}">
+              {% liquid
+                assign truck_icon = block.settings.delivery_truck_icon
+                if truck_icon == 'default'
+                  render 'icon-truck'
+                elsif truck_icon != blank
+                  echo truck_icon | image_url: width: 24 | image_tag: loading: 'lazy', class: 'custom-truck-icon-' | ai_gen_id
+                endif
+              %}
+            </span>
+            {{ block.settings.delivery_text_line2 }}
+          </p>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <!-- 7. Returns Guarantee -->
+    {% if block.settings.show_returns_info %}
+      <div class="returns-info-{{ ai_gen_id }}">
+        <div class="returns-icon-wrapper-{{ ai_gen_id }}">
+          {% if block.settings.returns_icon_type == 'svg' %}
+            {{ returns_icon_svg }}
+          {% elsif block.settings.returns_icon_type == 'image' and block.settings.returns_custom_icon != blank %}
+            <img src="{{ block.settings.returns_custom_icon | image_url: width: 56 }}" alt="{{ 'liquid.custom.returns_icon_alt' | t }}" class="return-icon-img-{{ ai_gen_id }}" loading="lazy" width="28" height="28">
+          {% else %}
+            {{ returns_icon_svg }}
+          {% endif %}
+        </div>
+        <div class="returns-text-{{ ai_gen_id }}">{{ block.settings.returns_text }}</div>
+      </div>
+    {% endif %}
+  {% endif %}
+</product-bundle-builder-{{ ai_gen_id }}>
+
+<script>
+  class ProductBundleBuilder_{{ ai_gen_id }} extends HTMLElement {
+    constructor() {
+      super();
+      this.aiId = this.dataset.aiId;
+      this.bundleProductHandle = this.dataset.bundleProductHandle;
+      this.tierItemCountRegex = new RegExp(this.dataset.tierItemCountRegex || '(\\d+)');
+      this.bestDealVariantTitle = this.dataset.bestDealVariantTitle;
+      this.moneyFormat = this.dataset.moneyFormat;
+      this.shopLocale = this.dataset.shopLocale || 'en-US';
+
+      this.masterBundleProduct = null;
+      this.tiers = [];
+      this.selectedTier = null;
+      this.selectedMixMatchItems = new Map(); // variantId -> { data, quantity }
+      this.mixMatchProductsData = [];
+
+      this.selectors = {
+        tierOptionsContainer: `.tier-options-${this.aiId}`,
+        mixMatchSection: `.mix-match-section-${this.aiId}`,
+        itemsToGo: `.items-to-go-${this.aiId}`,
+        filterBar: `.filter-bar-${this.aiId}`,
+        filterButton: `.filter-button-${this.aiId}`,
+        filterCount: `.filter-count-${this.aiId}`,
+        productList: `.product-list-${this.aiId}`,
+        productCard: `.product-card-${this.aiId}`,
+        subtotalSection: `.subtotal-section-${this.aiId}`,
+        originalPrice: `.original-price-${this.aiId}`,
+        finalPrice: `.final-price-${this.ai_gen_id}`,
+        savingsInfo: `.savings-info-${this.aiId}`,
+        addToCartButton: `.add-to-cart-btn-${this.aiId}`,
+        messageArea: `.message-area-${this.aiId}`,
+        scrollMoreIndicator: `.scroll-more-indicator-${this.aiId}`
+      };
+
+      this.domNodes = {};
+      for (const key in this.selectors) {
+        this.domNodes[key] = this.querySelector(this.selectors[key]);
+      }
+      this.domNodes.productCards = this.querySelectorAll(this.selectors.productCard);
+      this.domNodes.filterButtons = this.querySelectorAll(this.selectors.filterButton);
+
+      if (this.bundleProductHandle) {
+        this.init();
+      }
+    }
+
+    async init() {
+      await this.fetchMasterBundleProduct();
+      if (this.masterBundleProduct && this.masterBundleProduct.variants.length > 0) {
+        this.parseTiers();
+        this.renderTiers();
+        this.bindTierEvents();
+        this.bindMixMatchEvents();
+        this.bindFilterEvents();
+        this.updateItemsToGoText(); // Initial state
+        this.updateSubtotalDisplay();
+        this.checkScrollIndicatorVisibility();
+
+        // Populate initial product data for filtering counts
+        this.domNodes.productCards.forEach(card => {
+            this.mixMatchProductsData.push({
+                element: card,
+                tags: (card.dataset.productTags || '').split(',')
+            });
+        });
+        this.updateFilterCounts();
+
+      } else {
+        this.showMessage(Shopify.魷 líquido && Shopify.locale_strings.bundle_product_invalid ? Shopify.locale_strings.bundle_product_invalid : 'Master bundle product data is invalid or has no variants.', 'error');
+      }
+    }
+
+    async fetchMasterBundleProduct() {
+      try {
+        const response = await fetch(`/products/${this.bundleProductHandle}.js`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        this.masterBundleProduct = await response.json();
+      } catch (error) {
+        console.error('Error fetching master bundle product:', error);
+        this.masterBundleProduct = null;
+      }
+    }
+
+    parseTiers() {
+      let lowestPricePerItem = Infinity;
+      let autoBestDealTier = null;
+
+      this.tiers = this.masterBundleProduct.variants.map(variant => {
+        let itemsInTier = 0;
+        // Try to extract from options first if a specific option name is configured for it (not in this simplified version)
+        // Fallback to regex on title
+        const titleMatch = variant.title.match(this.tierItemCountRegex);
+        if (titleMatch && titleMatch[1]) {
+          itemsInTier = parseInt(titleMatch[1], 10);
+        } else {
+          // Fallback: check options like 'Size', 'Quantity', 'Pack'
+          variant.options.forEach(opt_val => {
+            const optMatch = String(opt_val).match(this.tierItemCountRegex);
+            if (optMatch && optMatch[1]) {
+                itemsInTier = parseInt(optMatch[1], 10);
+            }
+          });
+        }
+        
+        if (itemsInTier === 0) { // If still zero, try to parse from variant.name as last resort
+            const nameMatch = variant.name.match(this.tierItemCountRegex);
+             if (nameMatch && nameMatch[1]) {
+                itemsInTier = parseInt(nameMatch[1], 10);
+            }
+        }
+
+
+        if (itemsInTier === 0) {
+          console.warn(`Could not determine item count for tier: ${variant.title}. Defaulting to 1. Please check regex or variant naming.`);
+          itemsInTier = 1; // Default to 1 if parsing fails
+        }
+
+        const pricePerItem = itemsInTier > 0 ? variant.price / itemsInTier : variant.price;
+
+        if (pricePerItem < lowestPricePerItem) {
+          lowestPricePerItem = pricePerItem;
+          autoBestDealTier = variant.id;
+        }
+        
+        return {
+          id: variant.id,
+          title: variant.title,
+          price: variant.price,
+          itemsInTier: itemsInTier,
+          pricePerItem: pricePerItem,
+          isBestDeal: false // Will be set later
+        };
+      }).filter(tier => tier.itemsInTier > 0); // Ensure tiers with valid item counts
+
+      // Determine best deal
+      this.tiers.forEach(tier => {
+        if (this.bestDealVariantTitle && tier.title === this.bestDealVariantTitle) {
+          tier.isBestDeal = true;
+        } else if (!this.bestDealVariantTitle && tier.id === autoBestDealTier) {
+          tier.isBestDeal = true;
+        }
+      });
+       // If no specific best deal and multiple have same lowest price, mark the first one.
+      if (!this.bestDealVariantTitle && this.tiers.some(t => t.isBestDeal === false) && autoBestDealTier) {
+          const explicitBestDeal = this.tiers.find(t => t.isBestDeal);
+          if(!explicitBestDeal){
+              const firstLowest = this.tiers.find(t => t.id === autoBestDealTier);
+              if(firstLowest) firstLowest.isBestDeal = true;
+          }
+      }
+    }
+
+    renderTiers() {
+      if (!this.domNodes.tierOptionsContainer) return;
+      this.domNodes.tierOptionsContainer.innerHTML = this.tiers.map(tier => `
+        <button type="button" class="tier-button-${this.aiId}" data-tier-id="${tier.id}" role="radio" aria-checked="false">
+          ${tier.isBestDeal ? `<span class="best-deal-badge-${this.aiId}">${Shopify.locale_strings && Shopify.locale_strings.best_deal_text ? Shopify.locale_strings.best_deal_text : 'BEST DEAL'}</span>` : ''}
+          <span class="tier-label-${this.aiId}">${tier.title}</span>
+          <span class="tier-price-per-item-${this.aiId}">
+            ${this.formatMoney(tier.pricePerItem)} / ${Shopify.locale_strings && Shopify.locale_strings.item_singular ? Shopify.locale_strings.item_singular : 'item'}
+          </span>
+        </button>
+      `).join('');
+      this.domNodes.tierButtons = this.querySelectorAll(`.tier-button-${this.aiId}`);
+    }
+
+    bindTierEvents() {
+      if (!this.domNodes.tierButtons) return;
+      this.domNodes.tierButtons.forEach(button => {
+        button.addEventListener('click', (event) => this.handleTierSelection(event));
+      });
+    }
+
+    handleTierSelection(event) {
+      const selectedButton = event.currentTarget;
+      const tierId = parseInt(selectedButton.dataset.tierId);
+
+      if (this.selectedTier && this.selectedTier.id === tierId) return; // Already selected
+
+      this.selectedTier = this.tiers.find(t => t.id === tierId);
+
+      this.domNodes.tierButtons.forEach(btn => {
+        btn.classList.remove(`selected-${this.aiId}`);
+        btn.setAttribute('aria-checked', 'false');
+      });
+      selectedButton.classList.add(`selected-${this.aiId}`);
+      selectedButton.setAttribute('aria-checked', 'true');
+
+      // Reset mix & match selections
+      this.selectedMixMatchItems.clear();
+      this.domNodes.productCards.forEach(card => {
+        card.querySelector(`.add-product-btn-${this.aiId}`).classList.remove(`hidden-${this.aiId}`);
+        card.querySelector(`.product-quantity-control-${this.aiId}`).classList.add(`hidden-${this.aiId}`);
+      });
+      
+      this.domNodes.mixMatchSection?.classList.remove(`hidden-${this.aiId}`);
+      this.domNodes.subtotalSection?.classList.remove(`hidden-${this.aiId}`);
+      this.updateItemsToGoText();
+      this.updateSubtotalDisplay();
+      this.updateAddToCartButtonState();
+    }
+
+    bindMixMatchEvents() {
+        this.domNodes.productCards.forEach(card => {
+            const addButton = card.querySelector(`.add-product-btn-${this.aiId}`);
+            const quantityControl = card.querySelector(`.product-quantity-control-${this.aiId}`);
+            const decreaseButton = quantityControl.querySelector('[data-action="decrease"]');
+            // Increase button is disabled by default as we allow only 1 of each variant type.
+            // const increaseButton = quantityControl.querySelector('[data-action="increase"]');
+
+            addButton.addEventListener('click', () => this.handleAddMixMatchItem(card));
+            decreaseButton.addEventListener('click', () => this.handleRemoveMixMatchItem(card));
+        });
+    }
+
+    handleAddMixMatchItem(cardElement) {
+        if (!this.selectedTier) {
+            this.showMessage(Shopify.locale_strings && Shopify.locale_strings.select_tier_first ? Shopify.locale_strings.select_tier_first : 'Please select a quantity tier first.', 'error');
+            return;
+        }
+
+        const itemsSelectedCount = this.selectedMixMatchItems.size;
+        if (itemsSelectedCount >= this.selectedTier.itemsInTier) {
+            this.showMessage(Shopify.locale_strings && Shopify.locale_strings.bundle_full ? Shopify.locale_strings.bundle_full : 'Bundle is full. Cannot add more items.', 'error');
+            return;
+        }
+
+        const variantId = parseInt(cardElement.dataset.variantId);
+        if (this.selectedMixMatchItems.has(variantId)) return; // Already added
+
+        const productData = {
+            id: cardElement.dataset.productId,
+            variantId: variantId,
+            title: cardElement.dataset.productTitle,
+            price: parseInt(cardElement.dataset.variantPrice),
+            compareAtPrice: parseInt(cardElement.dataset.variantCompareAtPrice)
+        };
+        this.selectedMixMatchItems.set(variantId, { data: productData, quantity: 1 });
+
+        cardElement.querySelector(`.add-product-btn-${this.aiId}`).classList.add(`hidden-${this.aiId}`);
+        cardElement.querySelector(`.product-quantity-control-${this.aiId}`).classList.remove(`hidden-${this.aiId}`);
+        
+        this.updateItemsToGoText();
+        this.updateSubtotalDisplay();
+        this.updateAddToCartButtonState();
+        this.clearMessage();
+    }
+
+    handleRemoveMixMatchItem(cardElement) {
+        const variantId = parseInt(cardElement.dataset.variantId);
+        if (!this.selectedMixMatchItems.has(variantId)) return;
+
+        this.selectedMixMatchItems.delete(variantId);
+
+        cardElement.querySelector(`.add-product-btn-${this.aiId}`).classList.remove(`hidden-${this.aiId}`);
+        cardElement.querySelector(`.product-quantity-control-${this.aiId}`).classList.add(`hidden-${this.aiId}`);
+
+        this.updateItemsToGoText();
+        this.updateSubtotalDisplay();
+        this.updateAddToCartButtonState();
+    }
+    
+    updateItemsToGoText() {
+        if (!this.domNodes.itemsToGo) return;
+        if (!this.selectedTier) {
+            this.domNodes.itemsToGo.textContent = '';
+            return;
+        }
+        const itemsSelectedCount = this.selectedMixMatchItems.size;
+        const itemsRemaining = this.selectedTier.itemsInTier - itemsSelectedCount;
+        const singular = Shopify.locale_strings && Shopify.locale_strings.item_to_go_singular ? Shopify.locale_strings.item_to_go_singular : 'item to go';
+        const plural = Shopify.locale_strings && Shopify.locale_strings.items_to_go_plural ? Shopify.locale_strings.items_to_go_plural : 'items to go';
+        this.domNodes.itemsToGo.textContent = `${itemsRemaining} ${itemsRemaining === 1 ? singular : plural}`;
+    }
+
+    updateSubtotalDisplay() {
+        if (!this.domNodes.subtotalSection || !this.selectedTier) {
+            this.domNodes.originalPrice?.textContent = '';
+            this.domNodes.finalPrice?.textContent = '';
+            this.domNodes.savingsInfo?.classList.add(`hidden-${this.aiId}`);
+            return;
+        }
+
+        let currentOriginalTotal = 0;
+        this.selectedMixMatchItems.forEach(item => {
+            currentOriginalTotal += item.data.compareAtPrice * item.quantity;
+        });
+        
+        const itemsSelectedCount = this.selectedMixMatchItems.size;
+        let currentFinalTotal = 0;
+        if (this.selectedTier.itemsInTier > 0 && itemsSelectedCount > 0) {
+             // Pro-rate the price based on selected items towards the tier.
+            currentFinalTotal = (this.selectedTier.price / this.selectedTier.itemsInTier) * itemsSelectedCount;
+        } else if (itemsSelectedCount === 0) {
+            currentOriginalTotal = 0; // Show 0 if nothing selected
+        }
+
+
+        this.domNodes.originalPrice.textContent = this.formatMoney(currentOriginalTotal);
+        this.domNodes.finalPrice.textContent = this.formatMoney(currentFinalTotal);
+
+        if (currentOriginalTotal > currentFinalTotal && currentFinalTotal > 0) {
+            const savings = currentOriginalTotal - currentFinalTotal;
+            const savingsPercent = Math.round((savings / currentOriginalTotal) * 100);
+            const savingTextFormat = Shopify.locale_strings && Shopify.locale_strings.savings_text_format ? Shopify.locale_strings.savings_text_format : "You're Saving {{amount}}%";
+            this.domNodes.savingsInfo.textContent = savingTextFormat.replace('{{amount}}', savingsPercent);
+            this.domNodes.savingsInfo.classList.remove(`hidden-${this.aiId}`);
+        } else {
+            this.domNodes.savingsInfo.classList.add(`hidden-${this.aiId}`);
+        }
+    }
+
+    updateAddToCartButtonState() {
+      if (!this.domNodes.addToCartButton || !this.selectedTier) {
+        if(this.domNodes.addToCartButton) this.domNodes.addToCartButton.disabled = true;
+        return;
+      }
+      const itemsSelectedCount = this.selectedMixMatchItems.size;
+      this.domNodes.addToCartButton.disabled = itemsSelectedCount !== this.selectedTier.itemsInTier;
+    }
+
+    async handleAddToCart() {
+        if (!this.selectedTier || this.selectedMixMatchItems.size !== this.selectedTier.itemsInTier) {
+            this.showMessage(Shopify.locale_strings && Shopify.locale_strings.complete_bundle_first ? Shopify.locale_strings.complete_bundle_first : 'Please complete your bundle selection.', 'error');
+            return;
+        }
+        this.domNodes.addToCartButton.disabled = true;
+        this.domNodes.addToCartButton.textContent = Shopify.locale_strings && Shopify.locale_strings.adding_to_cart ? Shopify.locale_strings.adding_to_cart : 'Adding...';
+
+        const lineItemProperties = {};
+        let propCounter = 1;
+        this.selectedMixMatchItems.forEach(item => {
+            lineItemProperties[`_Item ${propCounter}`] = `${item.data.title} (Variant ID: ${item.data.variantId})`;
+            propCounter++;
+        });
+        // Add bundle identifier
+        lineItemProperties['_BundleName'] = this.selectedTier.title;
+
+
+        const formData = {
+            'items': [{
+                'id': this.selectedTier.id, // This is the master bundle product's variant ID
+                'quantity': 1,
+                'properties': lineItemProperties
+            }]
+        };
+
+        try {
+            const response = await fetch('/cart/add.js', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+            const cartData = await response.json();
+
+            if (response.ok) {
+                this.showMessage(Shopify.locale_strings && Shopify.locale_strings.bundle_added_to_cart ? Shopify.locale_strings.bundle_added_to_cart : 'Bundle added to cart!', 'success');
+                document.dispatchEvent(new CustomEvent('cart:updated', { bubbles: true, detail: cartData }));
+                // Optionally redirect to cart page or update cart drawer/icon
+                // window.location.href = '/cart';
+            } else {
+                const errorMsg = cartData.description || cartData.message || (Shopify.locale_strings && Shopify.locale_strings.error_adding_to_cart ? Shopify.locale_strings.error_adding_to_cart : 'Error adding to cart.');
+                this.showMessage(errorMsg, 'error');
+            }
+        } catch (error) {
+            console.error('Add to cart error:', error);
+            this.showMessage(Shopify.locale_strings && Shopify.locale_strings.error_adding_to_cart_network ? Shopify.locale_strings.error_adding_to_cart_network : 'Network error. Please try again.', 'error');
+        } finally {
+            this.domNodes.addToCartButton.disabled = false; // Re-enable based on bundle completion
+            this.updateAddToCartButtonState();
+            this.domNodes.addToCartButton.textContent = Shopify.locale_strings && Shopify.locale_strings.add_to_cart_button_text ? Shopify.locale_strings.add_to_cart_button_text : 'Add to Cart';
+        }
+    }
+
+    bindFilterEvents() {
+        this.domNodes.filterButtons.forEach(button => {
+            button.addEventListener('click', () => this.handleFilterSelection(button));
+        });
+        if(this.domNodes.addToCartButton) {
+          this.domNodes.addToCartButton.addEventListener('click', () => this.handleAddToCart());
+        }
+    }
+    
+    updateFilterCounts() {
+        if (!this.domNodes.filterCount) return;
+        const allFilterButton = Array.from(this.domNodes.filterButtons).find(btn => btn.dataset.tag === '*' || btn.dataset.tag === '');
+        if (allFilterButton) {
+            const countSpan = allFilterButton.querySelector(`.filter-count-${this.aiId}`);
+            if (countSpan) {
+                countSpan.textContent = `(${this.mixMatchProductsData.length})`;
+            }
+        }
+    }
+
+    handleFilterSelection(selectedButton) {
+        this.domNodes.filterButtons.forEach(btn => btn.classList.remove(`active-${this.aiId}`));
+        selectedButton.classList.add(`active-${this.aiId}`);
+        const filterTag = selectedButton.dataset.tag;
+
+        this.mixMatchProductsData.forEach(product => {
+            const show = filterTag === '*' || filterTag === '' || product.tags.includes(filterTag);
+            product.element.classList.toggle(`hidden-${this.aiId}`, !show);
+        });
+        this.checkScrollIndicatorVisibility();
+    }
+    
+    checkScrollIndicatorVisibility() {
+        if (!this.domNodes.productList || !this.domNodes.scrollMoreIndicator) return;
+        const isScrollable = this.domNodes.productList.scrollHeight > this.domNodes.productList.clientHeight;
+        this.domNodes.scrollMoreIndicator.classList.toggle(`hidden-${this.aiId}`, !isScrollable);
+    }
+
+    formatMoney(cents, format) {
+        if (typeof cents == 'string') {
+            cents = cents.replace('.', '');
+        }
+        let value = '';
+        const placeholderRegex = /\{\{\s*(\w+)\s*\}\}/;
+        const formatString = (format || this.moneyFormat);
+
+        function defaultOption(opt, def) {
+            return (typeof opt == 'undefined' ? def : opt);
+        }
+
+        function formatWithDelimiters(number, precision, thousands, decimal) {
+            precision = defaultOption(precision, 2);
+            thousands = defaultOption(thousands, ',');
+            decimal = defaultOption(decimal, '.');
+
+            if (isNaN(number) || number == null) { return 0; }
+
+            number = (number / 100.0).toFixed(precision);
+
+            const parts = number.split('.');
+            const dollars = parts[0].replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1' + thousands);
+            const cents = parts[1] ? (decimal + parts[1]) : '';
+
+            return dollars + cents;
+        }
+
+        switch (formatString.match(placeholderRegex)[1]) {
+            case 'amount_no_decimals':
+                value = formatWithDelimiters(cents, 0);
+                break;
+            case 'amount_with_comma_separator':
+                value = formatWithDelimiters(cents, 2, '.', ',');
+                break;
+            case 'amount_no_decimals_with_comma_separator':
+                value = formatWithDelimiters(cents, 0, '.', ',');
+                break;
+            case 'amount_with_apostrophe_separator':
+                 value = formatWithDelimiters(cents, 2, "'", ".");
+                 break;
+            default:
+                value = formatWithDelimiters(cents, 2);
+                break;
+        }
+        try {
+            return formatString.replace(placeholderRegex, value).replace(/<\/?[^>]+(>|$)/g, ""); // Strip potential HTML from currency symbol
+        } catch(e) {
+            // if shop money format is {{amount}}, this may fail.
+             return new Intl.NumberFormat(this.shopLocale, { style: 'currency', currency: Shopify.currency.active }).format(cents / 100);
+        }
+    }
+
+    showMessage(message, type = 'info') { // type can be 'info', 'success', 'error'
+        if (!this.domNodes.messageArea) return;
+        this.domNodes.messageArea.textContent = message;
+        this.domNodes.messageArea.className = `message-area-${this.aiId}`; // Reset classes
+        this.domNodes.messageArea.classList.add(`${type}-${this.aiId}`);
+        this.domNodes.messageArea.classList.remove(`hidden-${this.aiId}`);
+    }
+
+    clearMessage() {
+        if (!this.domNodes.messageArea) return;
+        this.domNodes.messageArea.classList.add(`hidden-${this.aiId}`);
+        this.domNodes.messageArea.textContent = '';
+    }
+  }
+  customElements.define('product-bundle-builder-{{ ai_gen_id }}', ProductBundleBuilder_{{ ai_gen_id }});
+</script>
+
+{% schema %}
+{
+  "name": "Product Bundle Builder",
+  "tag": "section",
+  "class": "shopify-section-product-bundle-builder",
+  "settings": [
+    {
+      "type": "header",
+      "content": "General Configuration"
+    },
+    {
+      "type": "product",
+      "id": "bundle_product_picker",
+      "label": "Master Bundle Product",
+      "info": "Select the main product whose variants define the bundle tiers (e.g., '3 Pairs', '6 Pairs'). Price comes from these variants."
+    },
+    {
+      "type": "collection",
+      "id": "mix_match_collection",
+      "label": "Mix & Match Product Source",
+      "info": "Select the collection containing products customer can choose from."
+    },
+    {
+      "type": "text",
+      "id": "tier_item_count_regex",
+      "label": "Tier Item Count Regex",
+      "default": "(\\d+)",
+      "info": "Regex to extract item count from master bundle product's variant titles (e.g., '(\\d+) Pairs' for '12 Pairs'). Captures the first group."
+    },
+    {
+      "type": "text",
+      "id": "best_deal_variant_title",
+      "label": "Best Deal Variant Title (Optional)",
+      "info": "Enter the exact title of the variant to mark as 'BEST DEAL'. If blank, the one with lowest price/item is chosen."
+    },
+    {
+      "type": "header",
+      "content": "Section 1: Select Quantity"
+    },
+    {
+      "type": "text",
+      "id": "title_select_quantity",
+      "label": "Section Title",
+      "default": "Select Quantity"
+    },
+    {
+      "type": "text",
+      "id": "global_pack_info_text",
+      "label": "'Pack Info' Text",
+      "default": "1 Pair Per Pack"
+    },
+    {
+      "type": "header",
+      "content": "Section 2: Mix & Match Products"
+    },
+    {
+      "type": "text",
+      "id": "title_mix_match",
+      "label": "Section Title",
+      "default": "Mix & Match Products"
+    },
+    {
+      "type": "textarea",
+      "id": "filter_buttons_json",
+      "label": "Filter Buttons (JSON)",
+      "default": "[{\"label\": \"All\", \"tag\": \"*\", \"is_default\": true}, {\"label\": \"Best Sellers\", \"tag\": \"best-seller\"}]",
+      "info": "JSON array for filter buttons. Ex: [{\"label\": \"All\", \"tag\": \"*\", \"is_default\": true}, {\"label\": \"Category A\", \"tag\": \"cat_a\"}] Tag '*' means all."
+    },
+    {
+      "type": "select",
+      "id": "product_description_source",
+      "label": "Product Description Source",
+      "options": [
+        { "value": "product_description", "label": "Product's Description (truncated)" },
+        { "value": "custom_text", "label": "Custom Text (below)" },
+        { "value": "none", "label": "None" }
+      ],
+      "default": "product_description"
+    },
+    {
+      "type": "text",
+      "id": "product_custom_description",
+      "label": "Custom Product Description Text",
+      "default": "Lorem ipsum dolor sit amet, consectetur."
+    },
+    {
+      "type": "text",
+      "id": "product_add_button_text",
+      "label": "'Add' Button Text (Product Card)",
+      "default": "Add"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_best_seller_badge",
+      "label": "Show 'Best Seller' Badge",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "best_seller_badge_text",
+      "label": "'Best Seller' Badge Text",
+      "default": "BEST SELLER"
+    },
+    {
+      "type": "text",
+      "id": "best_seller_tag",
+      "label": "Tag for 'Best Seller'",
+      "default": "best-seller",
+      "info": "Product tag that triggers this badge."
+    },
+    {
+      "type": "checkbox",
+      "id": "show_new_arrival_badge",
+      "label": "Show 'New Arrival' Badge",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "new_arrival_badge_text",
+      "label": "'New Arrival' Badge Text",
+      "default": "NEW ARRIVAL"
+    },
+    {
+      "type": "text",
+      "id": "new_arrival_tag",
+      "label": "Tag for 'New Arrival'",
+      "default": "new-arrival"
+    },
+    {
+      "type": "text",
+      "id": "scroll_more_text",
+      "label": "'Scroll for more' Text",
+      "default": "Scroll for more styles"
+    },
+    {
+      "type": "header",
+      "content": "Section 3: Suggestion Box (Optional)"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_suggestion_box",
+      "label": "Show Suggestion Box",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "suggestion_title",
+      "label": "Suggestion Box Title",
+      "default": "Can't Choose? Try our 3 Best Sellers!"
+    },
+    {
+      "type": "image_picker",
+      "id": "suggestion_image",
+      "label": "Suggestion Image"
+    },
+     {
+      "type": "text",
+      "id": "suggestion_info_icon_text",
+      "label": "Info Icon on Image (e.g. 'i')",
+      "default": "i"
+    },
+    {
+      "type": "text",
+      "id": "suggestion_pack_title",
+      "label": "Suggestion Pack Title",
+      "default": "Best Seller Pack"
+    },
+    {
+      "type": "richtext",
+      "id": "suggestion_pack_description",
+      "label": "Suggestion Pack Description",
+      "default": "<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>"
+    },
+    {
+      "type": "text",
+      "id": "suggestion_button_text",
+      "label": "Suggestion Button Text",
+      "default": "Shop"
+    },
+    {
+      "type": "url",
+      "id": "suggestion_button_link",
+      "label": "Suggestion Button Link"
+    },
+    {
+      "type": "header",
+      "content": "Section 4 & 5: Subtotal & Cart"
+    },
+    {
+      "type": "text",
+      "id": "subtotal_label",
+      "label": "Subtotal Label",
+      "default": "Subtotal:"
+    },
+    {
+      "type": "text",
+      "id": "add_to_cart_button_text",
+      "label": "'Add to Cart' Button Text",
+      "default": "Add to Cart"
+    },
+    {
+      "type": "header",
+      "content": "Section 6: Delivery Info (Optional)"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_delivery_info",
+      "label": "Show Delivery Information",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "delivery_text_line1",
+      "label": "Delivery Text Line 1",
+      "default": "Delivered by Apr 4"
+    },
+    {
+      "type": "text",
+      "id": "delivery_text_line2",
+      "label": "Delivery Text Line 2",
+      "default": "FREE Shipping over $50"
+    },
+    {
+      "type": "select",
+      "id": "delivery_truck_icon",
+      "label": "Delivery Truck Icon (Line 2)",
+      "options": [
+        { "value": "default", "label": "Default SVG Truck Icon"},
+        { "value": "", "label": "None"}
+      ],
+      "default": "default",
+      "info": "Set to 'None' or provide custom SVG/image in theme assets if needed and modify Liquid."
+    },
+    {
+      "type": "header",
+      "content": "Section 7: Returns Guarantee (Optional)"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_returns_info",
+      "label": "Show Returns Information",
+      "default": true
+    },
+    {
+      "type": "select",
+      "id": "returns_icon_type",
+      "label": "Returns Icon Type",
+      "options": [
+        { "value": "svg", "label": "Default SVG Checkmark Icon" },
+        { "value": "image", "label": "Custom Image" }
+      ],
+      "default": "svg"
+    },
+    {
+      "type": "image_picker",
+      "id": "returns_custom_icon",
+      "label": "Custom Returns Icon (if 'Custom Image' selected)"
+    },
+    {
+      "type": "richtext",
+      "id": "returns_text",
+      "label": "Returns Text",
+      "default": "<p>Enjoy <strong>30 days of free returns</strong>, with less than 1% of customers asking for their money back.</p>"
+    },
+    {
+      "type": "header",
+      "content": "Locale Strings for JS"
+    },
+    {
+      "type": "text",
+      "id": "js_str_best_deal", "label": "JS: 'BEST DEAL' text", "default": "BEST DEAL"
+    },
+    {
+      "type": "text",
+      "id": "js_str_item_singular", "label": "JS: 'item' (singular)", "default": "item"
+    },
+    {
+      "type": "text",
+      "id": "js_str_item_to_go_singular", "label": "JS: 'item to go' (singular)", "default": "item to go"
+    },
+    {
+      "type": "text",
+      "id": "js_str_items_to_go_plural", "label": "JS: 'items to go' (plural)", "default": "items to go"
+    },
+    {
+      "type": "text",
+      "id": "js_str_savings_format", "label": "JS: Savings text format", "default": "You're Saving {{amount}}%"
+    },
+    {
+      "type": "text",
+      "id": "js_str_adding_to_cart", "label": "JS: 'Adding to cart...' text", "default": "Adding..."
+    },
+    {
+      "type": "text",
+      "id": "js_str_msg_select_tier", "label": "JS Msg: Select tier first", "default": "Please select a quantity tier first."
+    },
+    {
+      "type": "text",
+      "id": "js_str_msg_bundle_full", "label": "JS Msg: Bundle full", "default": "Bundle is full. Cannot add more items."
+    },
+    {
+      "type": "text",
+      "id": "js_str_msg_complete_bundle", "label": "JS Msg: Complete bundle first (ATC)", "default": "Please complete your bundle selection."
+    },
+    {
+      "type": "text",
+      "id": "js_str_msg_bundle_added", "label": "JS Msg: Bundle added to cart", "default": "Bundle added to cart!"
+    },
+    {
+      "type": "text",
+      "id": "js_str_msg_error_atc", "label": "JS Msg: Error adding to cart", "default": "Error adding to cart."
+    },
+     {
+      "type": "text",
+      "id": "js_str_msg_error_atc_network", "label": "JS Msg: Network error (ATC)", "default": "Network error. Please try again."
+    },
+    {
+      "type": "text",
+      "id": "js_str_msg_bundle_product_invalid", "label": "JS Msg: Bundle product invalid", "default": "Master bundle product data is invalid or has no variants."
+    },
+
+    {
+      "type": "header",
+      "content": "Styling: General"
+    },
+    {
+      "type": "color",
+      "id": "background_color",
+      "label": "Container Background Color",
+      "default": "#F3F4F6"
+    },
+    {
+      "type": "color",
+      "id": "text_color_general",
+      "label": "General Text Color",
+      "default": "#374151"
+    },
+    {
+      "type": "font_picker",
+      "id": "font_family",
+      "label": "Font Family",
+      "default": "sans-serif"
+    },
+    {
+      "type": "range",
+      "id": "container_border_radius",
+      "label": "Container Border Radius",
+      "min": 0, "max": 30, "step": 1, "unit": "px",
+      "default": 12
+    },
+    {
+      "type": "range", "id": "padding_top", "label": "Padding Top", "min": 0, "max": 50, "step": 1, "unit": "px", "default": 20 },
+    { "type": "range", "id": "padding_bottom", "label": "Padding Bottom", "min": 0, "max": 50, "step": 1, "unit": "px", "default": 20 },
+    { "type": "range", "id": "padding_left", "label": "Padding Left", "min": 0, "max": 50, "step": 1, "unit": "px", "default": 15 },
+    { "type": "range", "id": "padding_right", "label": "Padding Right", "min": 0, "max": 50, "step": 1, "unit": "px", "default": 15 },
+    { "type": "range", "id": "main_sections_gap", "label": "Gap Between Main Sections", "min": 0, "max": 50, "step": 1, "unit": "px", "default": 20 },
+
+
+    { "type": "header", "content": "Styling: Section Titles & Steps" },
+    { "type": "color", "id": "section_title_color", "label": "Section Title Color", "default": "#111827" },
+    { "type": "range", "id": "section_title_font_size", "label": "Section Title Font Size", "min": 12, "max": 24, "step": 1, "unit": "px", "default": 16 },
+    { "type": "select", "id": "section_title_font_weight", "label": "Section Title Font Weight", "options": [ {"value": "normal", "label": "Normal"}, {"value": "bold", "label": "Bold"} ], "default": "bold" },
+    { "type": "range", "id": "section_title_margin_bottom", "label": "Section Title Margin Bottom", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 10 },
+    { "type": "color", "id": "step_number_bg_color", "label": "Step Number BG Color", "default": "#2563EB" },
+    { "type": "color", "id": "step_number_text_color", "label": "Step Number Text Color", "default": "#FFFFFF" },
+    { "type": "range", "id": "step_number_size", "label": "Step Number Circle Size", "min": 16, "max": 30, "step": 1, "unit": "px", "default": 20 },
+    { "type": "range", "id": "step_number_font_size", "label": "Step Number Font Size", "min": 8, "max": 16, "step": 1, "unit": "px", "default": 12 },
+
+    { "type": "header", "content": "Styling: Quantity Tier Selector" },
+    { "type": "range", "id": "quantity_selector_header_margin_bottom", "label": "Header Margin Bottom", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 8 },
+    { "type": "color", "id": "pack_info_text_color", "label": "'Pack Info' Text Color", "default": "#4B5563" },
+    { "type": "color", "id": "pack_info_bg_color", "label": "'Pack Info' BG Color", "default": "#E5E7EB" },
+    { "type": "range", "id": "pack_info_font_size", "label": "'Pack Info' Font Size", "min": 8, "max": 14, "step": 1, "unit": "px", "default": 10 },
+    { "type": "range", "id": "pack_info_border_radius", "label": "'Pack Info' Border Radius", "min": 0, "max": 10, "step": 1, "unit": "px", "default": 4 },
+    { "type": "range", "id": "tier_button_min_width", "label": "Tier Button Min Width", "min": 80, "max": 150, "step": 1, "unit": "px", "default": 100 },
+    { "type": "range", "id": "tier_button_gap", "label": "Tier Button Gap", "min": 4, "max": 20, "step": 1, "unit": "px", "default": 8 },
+    { "type": "color", "id": "tier_button_bg_color", "label": "Tier Btn BG", "default": "#FFFFFF" },
+    { "type": "color", "id": "tier_button_text_color", "label": "Tier Btn Text", "default": "#374151" },
+    { "type": "color", "id": "tier_button_border_color", "label": "Tier Btn Border", "default": "#D1D5DB" },
+    { "type": "color", "id": "tier_button_hover_border_color", "label": "Tier Btn Hover Border", "default": "#9CA3AF" },
+    { "type": "color", "id": "tier_button_selected_bg_color", "label": "Tier Btn Selected BG", "default": "#DBEAFE" },
+    { "type": "color", "id": "tier_button_selected_text_color", "label": "Tier Btn Selected Text", "default": "#1E40AF" },
+    { "type": "color", "id": "tier_button_selected_border_color", "label": "Tier Btn Selected Border", "default": "#2563EB" },
+    { "type": "range", "id": "tier_button_padding_y", "label": "Tier Btn Padding Y", "min": 4, "max": 20, "step": 1, "unit": "px", "default": 10 },
+    { "type": "range", "id": "tier_button_padding_x", "label": "Tier Btn Padding X", "min": 4, "max": 20, "step": 1, "unit": "px", "default": 10 },
+    { "type": "range", "id": "tier_button_border_radius", "label": "Tier Btn Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 8 },
+    { "type": "range", "id": "tier_label_font_size", "label": "Tier Label Font Size", "min": 10, "max": 18, "step": 1, "unit": "px", "default": 14 },
+    { "type": "color", "id": "tier_price_text_color", "label": "Tier Price/Item Text Color", "default": "#6B7280" },
+    { "type": "color", "id": "tier_price_selected_text_color", "label": "Tier Price/Item Selected Text Color", "default": "#1E40AF" },
+    { "type": "range", "id": "tier_price_font_size", "label": "Tier Price/Item Font Size", "min": 9, "max": 16, "step": 1, "unit": "px", "default": 12 },
+    { "type": "color", "id": "best_deal_badge_bg_color", "label": "'Best Deal' Badge BG", "default": "#1D4ED8" },
+    { "type": "color", "id": "best_deal_badge_text_color", "label": "'Best Deal' Badge Text", "default": "#FFFFFF" },
+    { "type": "range", "id": "best_deal_badge_font_size", "label": "'Best Deal' Badge Font Size", "min": 8, "max": 14, "step": 1, "unit": "px", "default": 10 },
+    { "type": "range", "id": "best_deal_badge_border_radius", "label": "'Best Deal' Badge Border Radius", "min": 0, "max": 10, "step": 1, "unit": "px", "default": 4 },
+
+    { "type": "header", "content": "Styling: Mix & Match Area" },
+    { "type": "range", "id": "mix_match_header_margin_bottom", "label": "Header Margin Bottom", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 10 },
+    { "type": "color", "id": "items_to_go_text_color", "label": "'Items to Go' Text", "default": "#1E40AF" },
+    { "type": "color", "id": "items_to_go_bg_color", "label": "'Items to Go' BG", "default": "#DBEAFE" },
+    { "type": "range", "id": "items_to_go_font_size", "label": "'Items to Go' Font Size", "min": 10, "max": 16, "step": 1, "unit": "px", "default": 12 },
+    { "type": "range", "id": "items_to_go_border_radius", "label": "'Items to Go' Border Radius", "min": 0, "max": 10, "step": 1, "unit": "px", "default": 4 },
+    { "type": "range", "id": "filter_button_gap", "label": "Filter Button Gap", "min": 4, "max": 16, "step": 1, "unit": "px", "default": 8 },
+    { "type": "range", "id": "filter_bar_margin_bottom", "label": "Filter Bar Margin Bottom", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 15 },
+    { "type": "color", "id": "filter_button_bg_color", "label": "Filter Btn BG", "default": "#FFFFFF" },
+    { "type": "color", "id": "filter_button_text_color", "label": "Filter Btn Text", "default": "#374151" },
+    { "type": "color", "id": "filter_button_border_color", "label": "Filter Btn Border", "default": "#D1D5DB" },
+    { "type": "color", "id": "filter_button_active_bg_color", "label": "Filter Btn Active BG", "default": "#374151" },
+    { "type": "color", "id": "filter_button_active_text_color", "label": "Filter Btn Active Text", "default": "#FFFFFF" },
+    { "type": "color", "id": "filter_button_active_border_color", "label": "Filter Btn Active Border", "default": "#374151" },
+    { "type": "range", "id": "filter_button_padding_y", "label": "Filter Btn Padding Y", "min": 2, "max": 12, "step": 1, "unit": "px", "default": 6 },
+    { "type": "range", "id": "filter_button_padding_x", "label": "Filter Btn Padding X", "min": 4, "max": 20, "step": 1, "unit": "px", "default": 12 },
+    { "type": "range", "id": "filter_button_border_radius", "label": "Filter Btn Border Radius", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 16 },
+    { "type": "range", "id": "filter_button_font_size", "label": "Filter Btn Font Size", "min": 10, "max": 16, "step": 1, "unit": "px", "default": 13 },
+    { "type": "range", "id": "product_list_max_height", "label": "Product List Max Height", "min": 100, "max": 600, "step": 10, "unit": "px", "default": 300 },
+    { "type": "range", "id": "scrollbar_width", "label": "Scrollbar Width", "min": 2, "max": 12, "step": 1, "unit": "px", "default": 6 },
+    { "type": "color", "id": "scrollbar_track_color", "label": "Scrollbar Track Color", "default": "#F1F1F1" },
+    { "type": "color", "id": "scrollbar_thumb_color", "label": "Scrollbar Thumb Color", "default": "#6B7280" },
+    { "type": "color", "id": "scrollbar_thumb_hover_color", "label": "Scrollbar Thumb Hover Color", "default": "#4B5563" },
+    { "type": "range", "id": "product_card_padding_y", "label": "Product Card Padding Y", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 10 },
+    { "type": "color", "id": "product_card_divider_color", "label": "Product Card Divider Color", "default": "#E5E7EB" },
+    { "type": "range", "id": "product_image_size", "label": "Product Image Size", "min": 40, "max": 100, "step": 1, "unit": "px", "default": 60 },
+    { "type": "range", "id": "product_image_border_radius", "label": "Product Image Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 8 },
+    { "type": "color", "id": "product_image_bg_placeholder", "label": "Product Image BG Placeholder", "default": "#F0F0F0" },
+    { "type": "color", "id": "product_title_color", "label": "Product Title Color", "default": "#111827" },
+    { "type": "range", "id": "product_title_font_size", "label": "Product Title Font Size", "min": 10, "max": 18, "step": 1, "unit": "px", "default": 14 },
+    { "type": "select", "id": "product_title_font_weight", "label": "Product Title Font Weight", "options": [{"value":"300","label":"Light"},{"value":"normal","label":"Normal"},{"value":"500","label":"Medium"},{"value":"bold","label":"Bold"}], "default": "500" },
+    { "type": "color", "id": "product_desc_color", "label": "Product Desc Color", "default": "#6B7280" },
+    { "type": "range", "id": "product_desc_font_size", "label": "Product Desc Font Size", "min": 9, "max": 14, "step": 1, "unit": "px", "default": 12 },
+    { "type": "color", "id": "badge_bs_bg_color", "label": "Best Seller Badge BG", "default": "#DBEAFE" },
+    { "type": "color", "id": "badge_bs_text_color", "label": "Best Seller Badge Text", "default": "#1E40AF" },
+    { "type": "color", "id": "badge_na_bg_color", "label": "New Arrival Badge BG", "default": "#FEF3C7" },
+    { "type": "color", "id": "badge_na_text_color", "label": "New Arrival Badge Text", "default": "#92400E" },
+    { "type": "range", "id": "product_badge_font_size", "label": "Product Badge Font Size", "min": 8, "max": 12, "step": 1, "unit": "px", "default": 10 },
+    { "type": "range", "id": "product_badge_border_radius", "label": "Product Badge Border Radius", "min": 0, "max": 10, "step": 1, "unit": "px", "default": 4 },
+    { "type": "color", "id": "product_add_btn_bg_color", "label": "Product Add Btn BG", "default": "#2563EB" },
+    { "type": "color", "id": "product_add_btn_text_color", "label": "Product Add Btn Text", "default": "#FFFFFF" },
+    { "type": "color", "id": "product_add_btn_border_color", "label": "Product Add Btn Border", "default": "transparent" },
+    { "type": "color", "id": "product_add_btn_hover_bg_color", "label": "Product Add Btn Hover BG", "default": "#1D4ED8" },
+    { "type": "range", "id": "product_add_btn_border_radius", "label": "Product Add Btn Border Radius", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 20 },
+    { "type": "range", "id": "product_add_btn_padding_y", "label": "Product Add Btn Padding Y", "min": 4, "max": 12, "step": 1, "unit": "px", "default": 8 },
+    { "type": "range", "id": "product_add_btn_padding_x", "label": "Product Add Btn Padding X", "min": 6, "max": 20, "step": 1, "unit": "px", "default": 15 },
+    { "type": "range", "id": "product_add_btn_font_size", "label": "Product Add Btn Font Size", "min": 10, "max": 16, "step": 1, "unit": "px", "default": 13 },
+    { "type": "color", "id": "product_qty_bg_color", "label": "Product Qty Control BG", "default": "#E5E7EB" },
+    { "type": "color", "id": "product_qty_btn_bg_color", "label": "Product Qty +/- Btn BG", "default": "#FFFFFF" },
+    { "type": "color", "id": "product_qty_btn_text_color", "label": "Product Qty +/- Btn Text", "default": "#374151" },
+    { "type": "color", "id": "product_qty_btn_hover_bg_color", "label": "Product Qty +/- Btn Hover BG", "default": "#F3F4F6" },
+    { "type": "range", "id": "product_qty_btn_size", "label": "Product Qty +/- Btn Size", "min": 20, "max": 36, "step": 1, "unit": "px", "default": 28 },
+    { "type": "color", "id": "product_qty_text_color", "label": "Product Qty Display Text Color", "default": "#111827" },
+    { "type": "range", "id": "product_qty_font_size", "label": "Product Qty Display Font Size", "min": 10, "max": 18, "step": 1, "unit": "px", "default": 14 },
+    { "type": "color", "id": "scroll_more_bg_color", "label": "'Scroll More' BG Color", "default": "#4B5563" },
+    { "type": "color", "id": "scroll_more_text_color", "label": "'Scroll More' Text Color", "default": "#FFFFFF" },
+    { "type": "range", "id": "scroll_more_padding_y", "label": "'Scroll More' Padding Y", "min": 4, "max": 12, "step": 1, "unit": "px", "default": 8 },
+    { "type": "range", "id": "scroll_more_font_size", "label": "'Scroll More' Font Size", "min": 9, "max": 14, "step": 1, "unit": "px", "default": 12 },
+
+    { "type": "header", "content": "Styling: Suggestion Box" },
+    { "type": "color", "id": "suggestion_bg_color", "label": "Suggestion Box BG", "default": "#E0E7FF" },
+    { "type": "color", "id": "suggestion_border_color", "label": "Suggestion Box Border", "default": "transparent" },
+    { "type": "range", "id": "suggestion_padding", "label": "Suggestion Box Padding", "min": 5, "max": 25, "step": 1, "unit": "px", "default": 15 },
+    { "type": "range", "id": "suggestion_border_radius", "label": "Suggestion Box Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 8 },
+    { "type": "color", "id": "suggestion_box_title_color", "label": "Sugg. Box Title Color", "default": "#3730A3" },
+    { "type": "range", "id": "suggestion_box_title_fs", "label": "Sugg. Box Title Font Size", "min": 12, "max": 20, "step": 1, "unit": "px", "default": 16 },
+    { "type": "select", "id": "suggestion_box_title_fw", "label": "Sugg. Box Title Font Weight", "options": [{"value":"normal","label":"Normal"},{"value":"bold","label":"Bold"}], "default": "bold" },
+    { "type": "range", "id": "suggestion_image_size", "label": "Sugg. Image Size", "min": 40, "max": 100, "step": 1, "unit": "px", "default": 70 },
+    { "type": "range", "id": "suggestion_image_border_radius", "label": "Sugg. Image Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 8 },
+    { "type": "color", "id": "suggestion_info_icon_bg", "label": "Sugg. Info Icon BG", "default": "rgba(0,0,0,0.5)" },
+    { "type": "color", "id": "suggestion_info_icon_color", "label": "Sugg. Info Icon Color", "default": "#FFFFFF" },
+    { "type": "color", "id": "suggestion_pack_title_color", "label": "Sugg. Pack Title Color", "default": "#3730A3" },
+    { "type": "range", "id": "suggestion_pack_title_fs", "label": "Sugg. Pack Title Font Size", "min": 10, "max": 18, "step": 1, "unit": "px", "default": 14 },
+    { "type": "select", "id": "suggestion_pack_title_fw", "label": "Sugg. Pack Title Font Weight", "options": [{"value":"normal","label":"Normal"},{"value":"bold","label":"Bold"}], "default": "bold" },
+    { "type": "color", "id": "suggestion_pack_desc_color", "label": "Sugg. Pack Desc Color", "default": "#4338CA" },
+    { "type": "range", "id": "suggestion_pack_desc_fs", "label": "Sugg. Pack Desc Font Size", "min": 9, "max": 14, "step": 1, "unit": "px", "default": 12 },
+    { "type": "color", "id": "suggestion_btn_bg_color", "label": "Sugg. Btn BG", "default": "#374151" },
+    { "type": "color", "id": "suggestion_btn_text_color", "label": "Sugg. Btn Text", "default": "#FFFFFF" },
+    { "type": "color", "id": "suggestion_btn_border_color", "label": "Sugg. Btn Border", "default": "transparent" },
+    { "type": "color", "id": "suggestion_btn_hover_bg_color", "label": "Sugg. Btn Hover BG", "default": "#1F2937" },
+    { "type": "range", "id": "suggestion_btn_border_radius", "label": "Sugg. Btn Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 6 },
+    { "type": "range", "id": "suggestion_btn_padding_y", "label": "Sugg. Btn Padding Y", "min": 4, "max": 16, "step": 1, "unit": "px", "default": 8 },
+    { "type": "range", "id": "suggestion_btn_padding_x", "label": "Sugg. Btn Padding X", "min": 6, "max": 24, "step": 1, "unit": "px", "default": 15 },
+    { "type": "range", "id": "suggestion_btn_font_size", "label": "Sugg. Btn Font Size", "min": 10, "max": 16, "step": 1, "unit": "px", "default": 13 },
+
+    { "type": "header", "content": "Styling: Subtotal Area" },
+    { "type": "range", "id": "subtotal_margin_bottom", "label": "Subtotal Area Margin Bottom", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 15 },
+    { "type": "range", "id": "subtotal_padding_top", "label": "Subtotal Area Padding Top", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 15 },
+    { "type": "color", "id": "subtotal_divider_color", "label": "Subtotal Area Top Divider", "default": "#E0E0E0" },
+    { "type": "color", "id": "subtotal_label_color", "label": "Subtotal Label Color", "default": "#111827" },
+    { "type": "range", "id": "subtotal_label_fs", "label": "Subtotal Label Font Size", "min": 12, "max": 24, "step": 1, "unit": "px", "default": 18 },
+    { "type": "select", "id": "subtotal_label_fw", "label": "Subtotal Label Font Weight", "options": [{"value":"normal","label":"Normal"},{"value":"bold","label":"Bold"}], "default": "bold" },
+    { "type": "color", "id": "subtotal_original_price_color", "label": "Original Price Color", "default": "#6B7280" },
+    { "type": "range", "id": "subtotal_original_price_fs", "label": "Original Price Font Size", "min": 10, "max": 18, "step": 1, "unit": "px", "default": 14 },
+    { "type": "select", "id": "subtotal_original_price_fw", "label": "Original Price Font Weight", "options": [{"value":"normal","label":"Normal"},{"value":"bold","label":"Bold"}], "default": "normal" },
+    { "type": "color", "id": "subtotal_final_price_color", "label": "Final Price Color", "default": "#111827" },
+    { "type": "range", "id": "subtotal_final_price_fs", "label": "Final Price Font Size", "min": 12, "max": 24, "step": 1, "unit": "px", "default": 18 },
+    { "type": "select", "id": "subtotal_final_price_fw", "label": "Final Price Font Weight", "options": [{"value":"normal","label":"Normal"},{"value":"bold","label":"Bold"}], "default": "bold" },
+    { "type": "color", "id": "savings_info_color", "label": "Savings Info Text Color", "default": "#065F46" },
+    { "type": "color", "id": "savings_info_bg_color", "label": "Savings Info BG Color", "default": "#D1FAE5" },
+    { "type": "range", "id": "savings_info_fs", "label": "Savings Info Font Size", "min": 9, "max": 14, "step": 1, "unit": "px", "default": 12 },
+    { "type": "range", "id": "savings_info_padding_y", "label": "Savings Info Padding Y", "min": 1, "max": 8, "step": 1, "unit": "px", "default": 2 },
+    { "type": "range", "id": "savings_info_padding_x", "label": "Savings Info Padding X", "min": 2, "max": 10, "step": 1, "unit": "px", "default": 6 },
+    { "type": "range", "id": "savings_info_border_radius", "label": "Savings Info Border Radius", "min": 0, "max": 10, "step": 1, "unit": "px", "default": 4 },
+
+    { "type": "header", "content": "Styling: Add to Cart Button" },
+    { "type": "color", "id": "atc_button_bg_color", "label": "ATC Btn BG", "default": "#1F2937" },
+    { "type": "color", "id": "atc_button_text_color", "label": "ATC Btn Text", "default": "#FFFFFF" },
+    { "type": "color", "id": "atc_button_border_color", "label": "ATC Btn Border", "default": "transparent" },
+    { "type": "color", "id": "atc_button_hover_bg_color", "label": "ATC Btn Hover BG", "default": "#111827" },
+    { "type": "color", "id": "atc_button_disabled_bg_color", "label": "ATC Btn Disabled BG", "default": "#9CA3AF" },
+    { "type": "color", "id": "atc_button_disabled_text_color", "label": "ATC Btn Disabled Text", "default": "#E5E7EB" },
+    { "type": "range", "id": "atc_button_padding_y", "label": "ATC Btn Padding Y", "min": 6, "max": 24, "step": 1, "unit": "px", "default": 12 },
+    { "type": "range", "id": "atc_button_padding_x", "label": "ATC Btn Padding X", "min": 10, "max": 40, "step": 1, "unit": "px", "default": 20 },
+    { "type": "range", "id": "atc_button_font_size", "label": "ATC Btn Font Size", "min": 12, "max": 20, "step": 1, "unit": "px", "default": 16 },
+    { "type": "select", "id": "atc_button_font_weight", "label": "ATC Btn Font Weight", "options": [{"value":"normal","label":"Normal"},{"value":"bold","label":"Bold"}], "default": "bold" },
+    { "type": "range", "id": "atc_button_border_radius", "label": "ATC Btn Border Radius", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 8 },
+    { "type": "range", "id": "atc_button_margin_bottom", "label": "ATC Btn Margin Bottom", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 15 },
+
+    { "type": "header", "content": "Styling: Delivery & Returns Info" },
+    { "type": "color", "id": "info_text_color", "label": "Info Text Color (Delivery/Returns)", "default": "#4B5563" },
+    { "type": "range", "id": "info_text_font_size", "label": "Info Text Font Size", "min": 9, "max": 14, "step": 1, "unit": "px", "default": 12 },
+    { "type": "color", "id": "delivery_dot_color", "label": "Delivery Info Dot Color", "default": "#22C55E" },
+    { "type": "color", "id": "returns_bg_color", "label": "Returns Box BG Color", "default": "#EFF6FF" },
+    { "type": "color", "id": "returns_border_color", "label": "Returns Box Border Color", "default": "#DBEAFE" },
+    { "type": "range", "id": "returns_padding", "label": "Returns Box Padding", "min": 5, "max": 20, "step": 1, "unit": "px", "default": 12 },
+    { "type": "range", "id": "returns_border_radius", "label": "Returns Box Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 8 },
+    { "type": "color", "id": "returns_icon_color", "label": "Returns Icon Color", "default": "#2563EB" },
+    { "type": "range", "id": "returns_icon_size", "label": "Returns Icon Size", "min": 16, "max": 40, "step": 1, "unit": "px", "default": 28 }
+
+  ],
+  "presets": [
+    {
+      "name": "Product Bundle Builder"
+    }
+  ],
+  "blocks": []
+}
+{% endschema %}
