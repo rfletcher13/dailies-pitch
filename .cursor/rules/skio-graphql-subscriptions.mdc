@@ -1,0 +1,125 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Skio GraphQL API for Subscriptions Guidelines
+
+This document provides guidelines for interacting with the Skio GraphQL API to manage subscription data. This API is separate from the Skio Dynamic Build-a-Box API.
+
+Skio API Key: 68b75f88-c5ff-422b-ba85-f0ce2f7f8847
+Skio siteId: 6c804ee7-4420-47ae-a75c-048e30a13802
+
+## 1. API Endpoint
+
+The primary endpoint for Skio's GraphQL API is:
+`https://graphql.skio.com/v1/graphql`
+
+## 2. Authorization
+
+To authorize requests, you need an API token generated from the Skio dashboard (API section).
+
+Include the token in the request headers:
+```
+{
+  "Content-Type": "application/graphql", // Or "application/json" if sending a JSON-formatted GraphQL query
+  "authorization": "API 68b75f88-c5ff-422b-ba85-f0ce2f7f8847"
+}
+```
+
+## 3. Data Model Mapping
+
+Skio's data model often mirrors Shopify's GraphQL objects. The `platformId` field in Skio API responses typically represents the Shopify Global ID (GID).
+
+| Skio Object        | Shopify Equivalent                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `Subscription`     | [`SubscriptionContract`](mdc:https:/shopify.dev/docs/api/customer/2024-04/objects/SubscriptionContract) |
+| `SubscriptionLine` | [`SubscriptionLine`](mdc:https:/shopify.dev/docs/api/admin-graphql/2024-04/objects/SubscriptionLine)     |
+| `Order`            | [`Order`](mdc:https:/shopify.dev/docs/api/admin-graphql/2024-04/objects/Order)                           |
+| `OrderLineItem`    | [`LineItem`](mdc:https:/shopify.dev/docs/api/admin-graphql/2024-04/objects/LineItem)                     |
+| `StorefrontUser`   | [`Customer`](mdc:https:/shopify.dev/docs/api/customer/2024-04/objects/Customer)                          |
+
+**Example `platformId`:** `gid://shopify/SubscriptionContract/12346616394`
+
+## 4. Querying Subscriptions
+
+Use GraphQL queries to fetch subscription data. You can filter, order, and select specific fields.
+
+**Example: Get Subscriptions for a User**
+This query retrieves subscriptions for a user with a specific email, ordered by creation date, and includes details about the user and subscription lines (active ones).
+
+```graphql
+query getSubscriptionsByEmail($userEmail: String!) {
+  Subscriptions(
+    where: {
+      StorefrontUser: {email: {_eq: $userEmail}}
+    },
+    order_by: {createdAt: desc}
+  ) {
+    id # Skio's internal ID (e.g., 09f3526e-1db3-aaaa-1234-871b3444523c)
+    platformId # Shopify GID (e.g., gid://shopify/SubscriptionContract/12131)
+    createdAt
+    StorefrontUser {
+      email
+      platformId # Shopify Customer GID (e.g., gid://shopify/Customer/1213)
+    }
+    # Filter out lines that have been removed (i.e., are inactive)
+    SubscriptionLines(where: {removedAt: {_is_null: true}}) {
+      priceWithoutDiscount
+      ProductVariant {
+        title # e.g., Large
+        Product {
+          title # e.g., Tuxedo
+        }
+      }
+      # Add other SubscriptionLine fields as needed, e.g.:
+      # platformId # Shopify SubscriptionLine GID
+      # quantity
+      # currentPrice { amount }
+      # originalPrice { amount }
+      # sellingPlanName # e.g., "Subscribe and save 10%"
+    }
+    # Add other Subscription fields as needed, e.g.:
+    # status # e.g., ACTIVE, CANCELLED, PAUSED
+    # nextBillingDate
+    # lastPaymentStatus
+    # billingPolicy { interval, intervalCount }
+    # deliveryPolicy { interval, intervalCount }
+  }
+}
+```
+
+**Variables for the example query:**
+```json
+{
+  "userEmail": "customer@example.com"
+}
+```
+
+## 5. Mutations (Creating/Updating Data)
+
+The Skio GraphQL API also supports mutations for actions like creating subscriptions, updating lines, etc. Refer to the Skio API documentation for specific mutation structures.
+
+**Example (Conceptual - refer to Skio docs for exact fields):**
+*   `CreateSubscriptionLine`: To add a new line to an existing subscription.
+    *   Input fields might include `price`, `quantity`, `variantId` (Skio's internal variant ID, not necessarily Shopify's GID directly, check API docs).
+
+## 6. Key Considerations
+
+*   **Skio IDs vs. Shopify GIDs:** Be mindful of which ID is required for API calls. `platformId` is generally the Shopify GID. Skio objects also have their own internal `id` (UUID).
+*   **Filtering:** Use `where` clauses extensively to narrow down results (e.g., by user email, subscription status, product ID).
+*   **Error Handling:** Implement proper error handling for GraphQL requests, checking for errors in the API response.
+*   **Rate Limits:** Be aware of any API rate limits.
+*   **Data Synchronization:** If you're storing Skio data locally, consider how you will keep it synchronized with Shopify and Skio.
+*   **Console Logging:** For development and debugging, log GraphQL queries, variables, and responses.
+    ```javascript
+    const graphqlQuery = `...your query...`;
+    const variables = { /* ...your variables... */ };
+    console.log('Skio GraphQL Query:', graphqlQuery, 'Variables:', variables);
+    // On response:
+    // console.log('Skio GraphQL Response:', responseData);
+    // On error:
+    // console.error('Skio GraphQL Error:', errorData);
+    ```
+
+This rule file should serve as a starting point. Always refer to the official Skio API documentation for the most up-to-date and complete information.

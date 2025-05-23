@@ -1,0 +1,188 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Skio Dynamic Build-a-Box Integration Guidelines
+
+This document outlines the process and key considerations for integrating Skio's Dynamic Build-a-Box (BAB) functionality into a Shopify theme. The goal is to enable customers to create customizable product bundles with variable pricing.
+
+Skio API Key: 68b75f88-c5ff-422b-ba85-f0ce2f7f8847
+Skio siteId: 6c804ee7-4420-47ae-a75c-048e30a13802
+
+## 1. Fetching Box Information
+
+To get the configuration and product details for a dynamic box, make a `POST` request to the Skio API.
+
+**Endpoint:** `https://api.skio.com/storefront-http/get-dynamic-box`
+
+**Method:** `POST`
+
+**Headers:**
+```json
+{
+  "Content-Type": "application/json"
+}
+```
+
+**Body:**
+The request body must contain the Shopify Product ID of the main build-a-box product selected in the Shopify Theme Customizer.
+```json
+{
+  "productPlatformId": "[SHOPIFY PRODUCT ID OF BAB PRODUCT]"
+}
+```
+*Replace `[SHOPIFY PRODUCT ID OF BAB PRODUCT]` with the actual Shopify Product ID (e.g., `"gid://shopify/Product/9755080655152"` or just the ID string like `"9755080655152"` if the API handles it).*
+
+**Example API Call (JavaScript):**
+```javascript
+async function fetchSkioDynamicBoxData(shopifyProductId) {
+  try {
+    const response = await fetch('https://api.skio.com/storefront-http/get-dynamic-box', {
+      method: 'POST',
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        "productPlatformId": shopifyProductId
+      })
+    });
+    if (!response.ok) {
+      console.error('Skio API Error - Response not OK:', response.status, await response.text());
+      return null;
+    }
+    const data = await response.json();
+    console.log('Skio Dynamic Box Data:', data);
+    return data;
+  } catch (error) {
+    console.error('Skio API Call Failed:', error);
+    return null;
+  }
+}
+```
+
+## 2. Understanding the API Response
+
+The API will return a JSON object containing detailed information about the dynamic box. Key fields to utilize include:
+
+*   `ok`: Boolean indicating if the request was successful.
+*   `DynamicBox`: Object containing all box details.
+    *   `boxId`: (string) The unique identifier for this build-a-box configuration. Essential for adding items to the cart.
+    *   `currencyCode`: (string) Currency code (e.g., "USD").
+    *   `percentDiscountTier` / `fixedDiscountTier`: Objects detailing discount structures based on quantity or other criteria.
+    *   `sizeRange` / `sizeInterval`: (array or object) Defines quantity limitations for the box (e.g., `sizeInterval: [1, 2, 3, 4]` means the customer can add 1, 2, 3, or 4 items). Use this to enforce rules on the frontend.
+    *   `selectableProductVariants`: (array) A list of products available to be added to the box. Each item includes:
+        *   `productTitle`
+        *   `productImageSrc`
+        *   `productPlatformId` (Shopify Product ID of the child product)
+        *   `productHandle`
+        *   `productVariants`: (array) Variants of the child product. Each variant includes:
+            *   `platformId` (Shopify Variant ID)
+            *   `productVariantTitle`
+            *   `imageSrc`
+            *   `price`
+            *   `compareAtPrice`
+            *   `inventory`
+    *   `sellingPlanGroup`: (object) Contains information about available subscription selling plans. Use this to build the subscription toggle. Each plan details:
+        *   `title`
+        *   `interval` (e.g., "DAY")
+        *   `intervalCount`
+        *   `priceAdjustmentType` / `priceAdjustmentAmount`
+        *   `variantMapping`: Maps Shopify variant IDs to adjusted prices and the `planId`. The `planId` is crucial for adding items to the cart with a subscription.
+    *   `settings`: (object) Various display and functional settings for the box (e.g., `header`, `subheader`, `displayByVariant`, `editableQuantity`).
+    *   `theme`: (object) Theme-related color and style settings provided by Skio, which can be used to style the BAB components.
+
+**Example API Output Snippet (refer to user-provided example for full structure):**
+```json
+{
+  "ok": true,
+  "DynamicBox": {
+    "boxId": "884cc113-6463-4f67-b8b5-2d58eefbcd61",
+    "sizeInterval": [1, 2, 3, 4],
+    "selectableProductVariants": [
+      {
+        "productTitle": "Clear Protein",
+        "productPlatformId": "gid://shopify/Product/9755080655152",
+        "productVariants": [
+          {
+            "platformId": "gid://shopify/ProductVariant/49564708143408",
+            "price": 38
+            // ... other variant details
+          }
+        ]
+      }
+    ],
+    "sellingPlanGroup": {
+      "gid://shopify/SellingPlan/691011748144": {
+        "title": "Every 30 days",
+        "planId": "gid://shopify/SellingPlan/691011748144"
+        // ... other selling plan details
+      }
+    }
+    // ... other DynamicBox properties
+  }
+}
+```
+
+## 3. Frontend Implementation Requirements
+
+Based on the Skio documentation and the API response, the following frontend components and functionalities are essential for a dynamic build-a-box experience:
+
+*   **Product Cards:**
+    *   Display for each item in `selectableProductVariants`.
+    *   Show product title, image, and price.
+    *   Include a **Quantity Selector** if `DynamicBox.settings.editableQuantity` is true or if the design implies individual quantity adjustments for items within the box.
+    *   Display price for each variant. Child product prices might be hidden on the customer portal based on `DynamicBox.settings.hideChildPriceCP`.
+
+*   **"Box Cart" / Selection Summary:**
+    *   A way to display products selected by the customer *before* they are officially added to the Shopify cart.
+    *   This local "cart" should reflect current selections, total quantity, and potentially the current discount tier achieved.
+
+*   **Subscription Toggle:**
+    *   Allow users to choose between a one-time purchase and subscription options.
+    *   Populate subscription options using the `DynamicBox.sellingPlanGroup` data.
+    *   Ensure the selected `selling_plan` ID is captured for each item when adding to the Shopify cart. If no subscription is chosen, `selling_plan` should be null or omitted.
+
+*   **Quantity Limitations:**
+    *   Use `DynamicBox.sizeRange` or `DynamicBox.sizeInterval` to restrict the number of products/items a customer can add to their box.
+    *   Implement frontend validation to guide the user (e.g., "Add 2 more items to complete your box").
+    *   Note: Skio mentions that these frontend limitations don't restrict quantities in the Shopify cart itself, so additional cart validation logic might be necessary if strict enforcement beyond the BAB interface is required.
+
+*   **Add to Shopify Cart:**
+    *   Each child product selected for the box needs to be added to the Shopify cart individually.
+    *   **Crucially**, each item added to the cart **MUST** include specific line item properties for Skio to recognize it as part of a dynamic build-a-box:
+        ```javascript
+        properties: {
+          _dynamicBoxIndex: 0, // Typically 0. Increment if multiple boxes of the SAME boxId are in the cart.
+          _dynamicBoxId: boxId // The boxId from the API response
+        }
+        ```
+    *   The add-to-cart data for each item should look like this:
+        ```javascript
+        {
+          quantity: item.quantity, // Quantity of this specific child item
+          id: item.variant_platform_id, // Shopify Variant ID of the child item
+          selling_plan: selectedSellingPlanId, // ID of the selected selling plan, if any
+          properties: {
+            _dynamicBoxIndex: 0, // Or appropriate index
+            _dynamicBoxId: dynamicBoxData.DynamicBox.boxId
+          }
+        }
+        ```
+
+## 4. General Guidelines
+
+*   **Error Handling:** Implement robust error handling for the API call (e.g., network issues, non-200 responses).
+*   **State Management:** Maintain the state of the selected items, quantities, subscription choice, and current box size locally on the client-side.
+*   **Responsiveness:** Ensure the interface is responsive and usable across different devices.
+*   **Styling:** Leverage the `DynamicBox.theme` object from the API response to apply Skio-defined styles, or use custom styles as required by the project, ensuring they are namespaced correctly according to Shopify theme development best practices.
+*   **Shopify Liquid Integration:**
+    *   Use a Shopify Product object (selected via theme customizer) as the trigger/entry point for the BAB. Its `product.id` (or `product.platform_id` if available in the correct format) will be used for the `productPlatformId` in the API call.
+    *   Render the BAB interface on the product page or within a section.
+    *   Use Liquid to pass necessary initial data to your JavaScript, like the main `productPlatformId`.
+*   **Console Logging:** For debugging purposes, log the API request, response, selected items, and data being sent to the Shopify cart.
+    ```javascript
+    console.log('Fetching Skio data for product ID:', shopifyProductId);
+    // In API call success: console.log('Skio Dynamic Box Data:', data);
+    // Before adding to cart: console.log('Adding to cart with data:', cartItemData);
+    ```

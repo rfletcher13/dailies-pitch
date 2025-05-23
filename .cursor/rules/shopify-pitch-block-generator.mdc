@@ -1,0 +1,105 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Shopify Pitch Theme Block Generation Guidelines
+
+When generating Shopify Liquid blocks for the Pitch theme, you must meticulously follow all instructions and pay close attention to the structure and detail demonstrated in user-provided examples (if any). The primary tech stack is Shopify Liquid, HTML, CSS, and JavaScript. You should primarily build modular Shopify blocks. Rarely will you create new elements other than blocks.
+
+## File Content Order and Structure
+
+The `.liquid` file must strictly follow this order:
+
+### 1. Documentation Block (`{% doc %}`)
+   - Begin *every* block with `{% doc %}`.
+   - Inside this block, comprehensively re-state and summarize the user's prompt.
+   - Detail all functional requirements, styling considerations, UX specifications, metafield dependencies, and any other pertinent information provided by the user.
+   - Format this section clearly (e.g., using `@prompt` followed by categorized requirements).
+   - End with `{% enddoc %}`.
+
+### 2. Unique ID Assignment
+   - Immediately after the `{% doc %}` block, include this exact Liquid assignment:
+     ```liquid
+     {% assign custom = block.id | replace: '_', '' | downcase %}
+     ```
+   - This `custom` variable is **CRITICAL** and **MUST** be used for namespacing all CSS selectors, HTML classes/IDs, and JavaScript custom element tags and selectors throughout the block.
+
+### 3. Global Liquid Logic (if any)
+   - Place any Liquid assignments (e.g., fetching product data, metafields, setting up initial variables) or logic that needs to be globally accessible within the block *before* the main HTML structure and *after* the unique ID assignment.
+
+### 4. CSS (`{% style %}`)
+   - Use the `{% style %}` Liquid tag for *all* CSS.
+   - **Crucially, ALL CSS selectors MUST be rigorously namespaced using the `{{ custom }}` variable.**
+     - Example: `.my-class-{{ custom }}`, `.header-{{ custom }} .title-{{ custom }}`.
+   - CSS properties should be extensively linked to `{{ block.settings }}` variables from the schema to allow for maximum customization.
+     - Example: `color: {{ block.settings.text_color }};`, `margin-top: {{ block.settings.margin_top }}px;`.
+   - Ensure CSS is responsive (mobile-first or desktop-first with appropriate media queries) and well-structured.
+
+### 5. HTML Structure
+   - The main wrapping element of your block (often a custom element or a `div`) **MUST** include `{{ block.shopify_attributes }}`.
+   - **ALL relevant HTML element classes (and IDs if absolutely necessary, though classes are preferred for styling and JS hooks) MUST be namespaced using `{{ custom }}`.**
+     - Example: `<div class="container-{{ custom }}">`, `<button class="button-primary-{{ custom }}">`.
+   - Use Liquid to render dynamic content based on `block.settings`, Shopify objects (like `product`, `collection`), and variables defined in the global Liquid logic.
+
+### 6. JavaScript (`<script>`)
+   - Encapsulate JavaScript to avoid global scope pollution.
+     - **Using Custom Elements is highly preferred.** Example: `class MyComponent extends HTMLElement { ... } customElements.define('my-component-{{ custom }}', MyComponent);`.
+     - If not using a custom element, use an Immediately Invoked Function Expression (IIFE).
+   - If using Custom Elements, the custom element tag name itself **MUST** also be namespaced with `{{ custom }}`.
+     - Example: `<my-component-{{ custom }}></my-component-{{ custom }}>`.
+   - JavaScript selectors **MUST** target elements using the namespaced classes/IDs.
+     - Example: `this.querySelector('.button-{{ custom }}')`, `this.element.classList.contains('active-{{ custom }}')`.
+   - Write clean, efficient, and robust JavaScript. Handle potential null elements gracefully.
+   - Prioritize native JavaScript and Shopify-provided APIs (e.g., AJAX API for cart operations). Avoid external libraries unless explicitly requested by the user AND it's the most sensible solution.
+   - **Add console logs** for debugging, including API calls, responses, data, and errors.
+
+### 7. Shopify Schema (`{% schema %}`)
+   - This is a **PARAMOUNT** part of your output. The schema **MUST** be **EXTREMELY DETAILED AND COMPREHENSIVE**, allowing for granular control over every aspect of the block via the Shopify Theme Customizer.
+
+   - **Settings Organization**:
+     - Use `header` type settings liberally to group related options logically (e.g., "General Settings", "Text Styling", "Button Appearance", "Layout & Spacing", "Product Card Settings", "Image Settings", "Advanced").
+
+   - **Comprehensive Options**:
+     - For *every* visual element, textual component, and configurable behavior, provide corresponding schema settings. Consider:
+       - **Texts**: Content (labels, titles, subtitles, buttons, placeholders, empty states), color, font (`font_picker`), font size, font weight, text alignment, text transform.
+       - **Colors**: Background color, text color, border color for all distinct elements (main containers, cards, sections, buttons, icons, links, inputs). Include settings for different states (normal, hover, active, disabled, selected).
+       - **Spacing**: Margin (top, bottom, left, right or block/inline), padding (top, bottom, left, right or block/inline) for the block and key internal components. Use `range` sliders with appropriate units (`px`, `%`, `vw`, `vh`).
+       - **Borders**: Color, width, radius (individual corners if applicable), style (solid, dashed, dotted).
+       - **Images/Media**: `image_picker`, aspect ratio options, object fit, max-width/height, overlay color/opacity, video URLs, poster images.
+       - **Buttons**: Text, link, style variations (primary, secondary, text-only), colors (background, text, border for normal and hover states), padding, border radius, full-width option, icon options.
+       - **Layout**: Number of items per row (grids/collections), alignment (horizontal, vertical), content direction, show/hide toggles for optional elements.
+       - **Functionality**: Metafield keys (if data is dynamic), selection limits, speed/autoplay for carousels, transition effects, API endpoints.
+
+   - **Setting Details**: Each setting **MUST** have:
+     - `type`: (e.g., `text`, `textarea`, `richtext`, `color`, `range`, `select`, `checkbox`, `image_picker`, `product`, `collection`, `url`, `font_picker`, `header`, `paragraph`).
+     - `id`: A unique identifier.
+     - `label`: A clear, user-friendly description.
+     - `default`: A sensible default value.
+     - `info`: (Optional) Extra guidance or explanation for the merchant.
+
+   - **Presets**:
+     - **Always include at least one preset** with a descriptive name.
+       ```json
+       "presets": [
+         {
+           "name": "Descriptive Name for Block Functionality"
+           // Optionally, include "category" here
+         }
+       ]
+       ```
+
+   - **Block Attributes**:
+     - `name`: A user-friendly name for the block in the theme editor.
+     - `tag`: Typically `null` for blocks within sections. Can be an HTML tag like `div` if the block is a simple wrapper.
+     - `class`: A general CSS class for the block (e.g., `product-bundle-feature`), which will be supplemented by the `{{ custom }}`-namespaced classes in the HTML for instance-specific styling.
+     - (Optional) `stylesheet` and `javascript` (if separating files, but assume inline unless specified).
+     - (Optional) `max_blocks`, `default_presets` (if making a section with blocks).
+
+## Code Quality and Best Practices
+   - Generated code **MUST** be clean, well-commented (especially for complex Liquid or JavaScript logic), and efficient.
+   - Follow Shopify development best practices for performance, accessibility (e.g., semantic HTML, ARIA attributes where appropriate), and maintainability.
+   - Ensure all dynamic Liquid outputs are properly escaped where necessary (e.g., `{{ variable | escape }}`).
+   - If a user-provided example is available, treat it as the gold standard for the level of detail in CSS, JavaScript logic, and especially the schema. Strive to match or exceed that level of thoroughness.
+
+Your goal is to provide production-ready, highly customizable Shopify block code. Be meticulous, precise, and exhaustive in your implementation.
