@@ -1,7 +1,7 @@
 ---
-description: 
+description: subscriptions
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
 # Skio GraphQL API for Subscriptions Guidelines
 

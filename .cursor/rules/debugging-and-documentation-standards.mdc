@@ -1,0 +1,53 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Debugging and Documentation Standards
+
+This rule outlines the standards for inline documentation and console logging to ensure code clarity, maintainability, and ease of debugging.
+
+## 1. Inline Documentation (Comments)
+
+- **Be Comprehensive:** Add comments generously, especially for complex logic, non-obvious decisions, or critical sections of code.
+- **Explain the "Why":** Comments should not just restate what the code does (which should be clear from the code itself if well-written), but *why* it does it, or why a particular approach was taken.
+- **Clarity is Key:** Write clear, concise, and easy-to-understand comments.
+- **Update Comments:** When code is modified, ensure that corresponding comments are also updated to reflect the changes. Stale comments are worse than no comments.
+- **Function/Method Headers:** For functions and methods, especially in languages that support it (like JSDoc for JavaScript, or Python docstrings), include a brief description of what the function does, its parameters (name, type, description), and what it returns.
+- **Complex Algorithms:** For any non-trivial algorithms or business logic, provide a high-level overview in a comment before the code block.
+
+## 2. Console Logging for Debugging
+
+- **Log Key Data and Actions:** Strategically insert console logs to output important data, variable states, function entries/exits, and the results of significant operations or decisions.
+- **Identify Log Sources:** Make it clear where a log message is coming from, e.g., by prefixing the log with the function name or component name:
+  ```javascript
+  console.log('[MyComponent] Data received:', data);
+  console.error('[MyAPIModule] Error fetching user:', error);
+  ```
+- **Log API Calls and Responses:**
+    - Before making an API call, log the endpoint, method, and payload (if any).
+    - Upon receiving a response, log the status code and the response body (or a summary if it's very large).
+    - Log any errors encountered during API interactions explicitly.
+    ```javascript
+    // Example for an API call
+    console.log(`[UserProfile] Fetching profile for userID: ${userId}`);
+    fetch(`/api/users/${userId}`)
+      .then(response => {
+        console.log(`[UserProfile] API Response Status: ${response.status}`);
+        if (!response.ok) {
+          console.error('[UserProfile] API Error - Response not OK', response);
+        }
+        return response.json();
+      })
+      .then(data => {
+        console.log('[UserProfile] Profile data:', data);
+      })
+      .catch(error => {
+        console.error('[UserProfile] Failed to fetch profile:', error);
+      });
+    ```
+- **Conditional Logging:** For potentially noisy logs or logs only needed in development, consider making them conditional (e.g., based on an environment variable or a debug flag), though for AI-assisted development, more logging is generally better during the generation phase.
+- **Log Levels:** Use appropriate console logging levels (e.g., `console.log()`, `console.warn()`, `console.error()`, `console.info()`, `console.debug()`) to differentiate the severity or nature of the logged information.
+- **Be Informative:** Log messages should be descriptive enough to understand the context without needing to dive deep into the code immediately.
+
+By adhering to these standards, the codebase will be easier to understand, debug, and maintain, both for human developers and AI assistants.
