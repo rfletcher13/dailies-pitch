@@ -543,7 +543,7 @@
   {%- if product_shopify_id_numeric != blank -%}
     <dynamic-box-builder-{{ rob_custom }}
       data-product-id="{{ product_shopify_id_numeric }}"
-      data-variant-metafields="{{ variant_metafields_json_string | escape }}"
+      data-variant-metafields="{{ variant_metafields_json_string }}"
       data-rob-custom="{{ rob_custom }}"
     >
       <div class="loading-state-{{ rob_custom }}">
