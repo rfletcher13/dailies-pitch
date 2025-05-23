@@ -659,15 +659,16 @@
     constructor() {
       super();
       this.rob_custom = this.dataset.robCustom;
-      this.boxProductGid = this.dataset.boxProductGid;
+      // Ensure you are using the GID passed for the API call, not the numeric ID
+      this.boxProductGidForApi = this.dataset.boxProductGid; // This should be the full GID
       this.variantsData = JSON.parse(this.dataset.variantsJson);
       this.settings = JSON.parse(this.dataset.settings);
       this.currencyCode = this.dataset.currencyCode;
 
       this.dynamicBoxData = null;
-      this.selectedQuantityOption = null; // e.g. 4 (for 4 bags)
-      this.selectedPurchaseType = 'subscribe'; // 'subscribe' or 'onetime'
-      this.selectedFlavors = {}; // { variant_platform_id: quantity }
+      this.selectedQuantityOption = null; 
+      this.selectedPurchaseType = 'subscribe'; 
+      this.selectedFlavors = {}; 
 
       this.loadingEl = this.querySelector(`.loading-state-${this.rob_custom}`);
       this.contentWrapperEl = this.querySelector(`.content-wrapper-${this.rob_custom}`);
@@ -682,8 +683,6 @@
       this.summarySectionEl = this.querySelector(`#summary-section-${this.rob_custom}`);
       this.firstOrderBannerEl = this.querySelector(`#first-order-banner-${this.rob_custom}`);
 
-
-      // Modal elements
       this.modal = this.querySelector(`#flavor-modal-${this.rob_custom}`);
       this.modalCloseBtn = this.querySelector(`#modal-close-btn-${this.rob_custom}`);
       this.modalImage = this.querySelector(`#modal-image-${this.rob_custom}`);
@@ -695,8 +694,8 @@
       this.seeLabelContent = this.querySelector(`#see-label-content-${this.rob_custom}`);
       this.accordionArrow = this.seeLabelHeader.querySelector(`.accordion-arrow-${this.rob_custom}`);
 
-      if (!this.boxProductGid) {
-        this.displayError('Product not configured for the box.');
+      if (!this.boxProductGidForApi) { // Check the GID for API
+        this.displayError('Product GID for API not configured.');
         return;
       }
       this.fetchDynamicBoxData();
