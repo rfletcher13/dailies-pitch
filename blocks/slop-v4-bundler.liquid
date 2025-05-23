@@ -880,7 +880,6 @@
         `;
         this.flavorListContainer.appendChild(item);
 
-        // Event listeners for +/-/add buttons and image/title for modal
         item.querySelector(`img[data-variant-id="${apiVariant.platformId}"]`).addEventListener('click', () => this.openModal(apiVariant.platformId));
         item.querySelector(`.flavor-title-${this.rob_custom}[data-variant-id="${apiVariant.platformId}"]`).addEventListener('click', () => this.openModal(apiVariant.platformId));
 
