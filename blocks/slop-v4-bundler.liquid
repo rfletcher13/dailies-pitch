@@ -95,7 +95,7 @@
   assign rob_custom = block.id | replace: '_', '' | downcase
   assign box_product_gid = null
   if block.settings.box_product != blank
-    assign box_product_gid = "gid://shopify/Product/" | append: block.settings.box_product.id
+    assign box_product_gid = block.settings.box_product.id
   endif
 
   assign variants_json_data = '{}' | parse_json
