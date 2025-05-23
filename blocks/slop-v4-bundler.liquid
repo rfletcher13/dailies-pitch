@@ -734,11 +734,11 @@
         const data = await response.json();
         console.log('Skio API Response:', data);
 
-        if (data.ok && data.DynamicBox) {
-          this.dynamicBoxData = data.DynamicBox;
+        if (data.boxId && data.selectableProductVariants) { // Check for key properties of DynamicBox
+          this.dynamicBoxData = data; // Assign data directly
           this.initialize();
         } else {
-          throw new Error('Skio API response not OK or DynamicBox data missing.');
+          throw new Error('Skio API response does not contain expected DynamicBox data.');
         }
       } catch (error) {
         this.displayError(error.message);
