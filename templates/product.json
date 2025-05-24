@@ -303,7 +303,7 @@
               "name": "Skio Dynamic Box",
               "settings": {
                 "main_product_for_skio": "{{ closest.product.metafields.custom.build_a_box_product.value }}",
-                "collection_for_flavor_metafields": "",
+                "collection_for_flavor_metafields": "clear-protein",
                 "default_bag_count": 3,
                 "redirect_to_cart": false,
                 "background_color": "#ffffff",
@@ -312,7 +312,7 @@
                 "block_border_width": 0,
                 "block_border_color": "#e0e0e0",
                 "max_width": 600,
-                "font": "sans-serif",
+                "font": "amiri_n4",
                 "text_color": "#333333",
                 "light_text_color": "#777777",
                 "border_color": "#e0e0e0",
