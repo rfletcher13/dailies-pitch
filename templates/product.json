@@ -312,7 +312,7 @@
                 "block_border_width": 0,
                 "block_border_color": "#e0e0e0",
                 "max_width": 600,
-                "font": "amiri_n4",
+                "font": "inter_n4",
                 "text_color": "#333333",
                 "light_text_color": "#777777",
                 "border_color": "#e0e0e0",
