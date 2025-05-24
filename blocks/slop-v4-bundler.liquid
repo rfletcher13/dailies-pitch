@@ -1,1449 +1,1129 @@
-{%- comment -%}
-  IMPORTANT:
-  - This block relies on the Skio Dynamic Box API.
-  - The `productPlatformId` for the API call is derived from the `box_product` setting.
-  - Variant metafields `custom.flavor_description`, `custom.nutritional_information`,
-    `custom.variant_flag`, `custom.servings`, `custom.primary_color`, `custom.secondary_color`
-    are expected on the variants of the selected `box_product`.
-  - Pricing logic for "Subscribe & Save" uses the `percentDiscountTier` from the Skio API response
-    as per prompt instructions.
-  - The "SAVE X% ON FIRST ORDER" and "Y% OFF future orders" are informational texts from settings.
-{%- endcomment -%}
-
 {%- doc -%}
   @prompt
-  The user wants a Shopify Liquid block that implements a "Build a Box" feature based on images provided and a Skio Dynamic Box API.
+  Refactor the provided Shopify snippet and section into a single Liquid block.
+  The block should replace the product form (variant options, quantity selector, add to cart, subscribe buttons, etc.) on a product page.
+  The final appearance should match the provided target images.
+  Product images (carousel, USP icons) should be removed from this block.
 
   Functional Requirements:
-  1.  **API Integration**:
-      - Fetch data from Skio Dynamic Box API (`https://api.skio.com/storefront-http/get-dynamic-box`).
-      - API call method: POST.
-      - Body: `{"productPlatformId": "[SHOPIFY PRODUCT GID FROM THEME CUSTOMIZER]"}`.
-      - Use the API response to render dynamic content.
-  2.  **Quantity Options**:
-      - Display quantity options based on `DynamicBox.sizeInterval` from API response.
-      - "BEST DEAL" label on the largest quantity option.
-      - Selecting a quantity option updates pricing and related UI elements.
-      - The highest quantity option should be selected by default.
-  3.  **Purchase Type Selection**:
-      - Offer "Subscribe & Save" and "One-time Purchase" options.
-      - "Subscribe & Save" should be selected by default.
-      - Pricing updates based on selection.
-      - "Subscribe & Save" price calculation must use `DynamicBox.percentDiscountTier` based on selected quantity.
-      - Display original (strikethrough) and discounted price for "Subscribe & Save".
-      - Display informational texts: "FREE SHIPPING on first order", "NO CONTRACT cancel easily", "OUT OF STOCK PROTECTION", "SAVE X% ON FIRST ORDER", "Y% OFF future orders".
-  4.  **Flavor Selection**:
-      - List selectable product variants from `DynamicBox.selectableProductVariants[0].productVariants`.
-      - Each flavor item should display:
-          - Image (`imageSrc`).
-          - Title (`productVariantTitle`).
-          - Description (from variant metafield `custom.flavor_description`).
-          - Quantity stepper (+/- buttons) or "Add +" button if quantity is 0.
-      - Clicking a flavor item opens a modal with more details.
-  5.  **Flavor Detail Modal**:
-      - Modal displays:
-          - Variant Image.
-          - Static title "Protein Coffee" (configurable).
-          - Flavor Name (`productVariantTitle`).
-          - Flavor Description (`custom.flavor_description`).
-          - Badges:
-              - Content from `custom.variant_flag` (e.g., "20 Servings"). BG color `custom.primary_color`.
-              - Content from `custom.servings` (e.g., "10g Protein"). BG color `custom.secondary_color`.
-              - A third optional configurable badge (e.g., "105mg Caffeine").
-              - Badge font color is configurable.
-          - "SEE LABEL" accordion: Expands to show nutrition facts panel.
-          - Nutrition facts content from variant metafield `custom.nutritional_information`.
-  6.  **Pricing & Subtotal Display**:
-      - Subtotal dynamically updates based on selected items, quantity, and purchase type.
-      - "You're saving" amount dynamically updates.
-      - These are shown only when the required number of items (based on selected quantity option) has been added.
-  7.  **Add to Cart Button**:
-      - Initially disabled. Text: "SELECT X MORE BAGS". Color: `block.settings.cart_button_bg_disabled_color`.
-      - Enabled when `total_items_selected >= selected_quantity_option`. Text: "ADD TO CART". Color: `block.settings.cart_button_bg_color`.
-      - On click, add selected items to Shopify cart. For "Subscribe & Save", include `selling_plan` ID from API response.
-  8.  **Status Banner**:
-      - Displays "X Flavor to Go" or "All Set! (You can add more)" based on selected items vs. required quantity.
-  9.  **Metafield Dependencies**:
-      - `product.variants.metafields.custom.flavor_description` (text)
-      - `product.variants.metafields.custom.nutritional_information` (rich_text or text)
-      - `product.variants.metafields.custom.variant_flag` (text)
-      - `product.variants.metafields.custom.servings` (text)
-      - `product.variants.metafields.custom.primary_color` (color string, e.g., #RRGGBB)
-      - `product.variants.metafields.custom.secondary_color` (color string, e.g., #RRGGBB)
-  10. **Styling**:
-      - Match provided images as closely as possible.
-      - All colors, fonts (where possible), spacing, and text labels should be configurable via Shopify Theme Customizer settings.
-      - CSS must be namespaced using `{{ rob_custom }}`.
-      - Responsive design.
+  - Bag Quantity Selection: Buttons for 1, 2, 3, 4 bags. "Best Deal" badge for 4 bags. This selection determines the target number of items. Default selection configurable.
+  - Purchase Type Selection:
+    - "Subscribe & Save": Displays discounted price, original price (strikethrough), and benefits list. Has an optional promotional banner.
+    - "One-time Purchase": Displays its price.
+  - Flavor Selection:
+    - List of available flavors (from Skio API), each with name and description (from product variant metafields).
+    - "Add +" button per flavor, which changes to a quantity stepper ("-", input, "+") upon clicking.
+  - Dynamic Pricing: Prices update based on selected bag quantity, purchase type, and current flavor selections using Skio logic.
+  - Subtotal & Savings: Display calculated subtotal and savings amount.
+  - Add to Cart Button:
+    - Text updates dynamically (e.g., "ADD TO CART", "SELECT X MORE BAGS").
+    - Enabled/disabled based on whether the target number of flavors/bags has been met.
+  - Informational Messages: Messages like "X Flavor(s) to Go" or "All Set! (You can add more)" near the flavor selection header.
+  - Skio Integration: Continue using Skio API for dynamic box pricing, variant information, and subscription plan details. Requires a "main product" ID for the Skio API call.
+
+  Styling Considerations:
+  - Adhere closely to the visual style of the target images.
+  - All CSS namespaced using `{{ rob_custom }}`.
+  - Highly customizable via schema settings (colors, fonts, spacing, texts).
 
   UX Specifications:
-  - Clear visual hierarchy.
-  - Interactive elements should provide feedback.
-  - Modal for detailed product view.
-  - Smooth transitions and updates.
+  - Interactive price updates.
+  - Clear visual feedback for selections and requirements.
+  - Loading state for flavors.
+
+  Metafield Dependencies:
+  - Product variant metafield for flavor description (e.g., `metafields.custom.flavor_description`). A collection can be specified to source these variants if not directly on the main Skio product.
+  - The block uses a main product (the "box product") whose ID is used for Skio API calls.
 
   Schema Requirements:
-  - Extremely detailed and comprehensive for granular control.
-  - Sections for General Settings, Quantity Options, Purchase Options, Flavor List, Modal, Badges, Pricing, ATC Button, Spacing, etc.
-  - `product` picker for the main box product.
-  - Text inputs for all labels, informational texts.
-  - Color pickers for backgrounds, text, borders, states.
-  - Range sliders for spacing.
-{% enddoc %}
+  - Comprehensive schema for all text customization (titles, labels, button texts, messages, benefits), colors (backgrounds, text, borders for various elements and states), spacing, border styles, font settings.
+  - Settings for main product for Skio, collection for flavor metafields, default bag count, promotional banners, etc.
+  - At least one preset.
+{%- enddoc -%}
 
+{% assign rob_custom = block.id | replace: '_', '' | downcase %}
+
+{% comment %} Global Liquid Logic Start {% endcomment %}
 {%- liquid
-  assign rob_custom = block.id | replace: '_', '' | downcase
-  assign box_product_gid_for_api = null
-  if block.settings.box_product != blank
-    assign box_product_gid_for_api = block.settings.box_product.gid
+  assign product_for_skio_setting = block.settings.main_product_for_skio
+  assign box_product_for_skio_obj = all_products[product_for_skio_setting]
+  if box_product_for_skio_obj == blank and product != blank and product.id == product_for_skio_setting.id
+    assign box_product_for_skio_obj = product
   endif
 
-  assign local_variants_product_id = null
-  if block.settings.box_product != blank
-    assign local_variants_product_id = block.settings.box_product.id
-  endif
+  assign box_product_id_js = box_product_for_skio_obj.id | default: product.id | json  
 
-  assign variants_json_data = '{}' | parse_json
-  if block.settings.box_product.variants.size > 0
-    assign temp_variants_array = '[]' | parse_json
-    for variant in block.settings.box_product.variants
-      assign temp_variant_obj = '{}' | parse_json
-      assign temp_variant_obj = temp_variant_obj | merge: 'id', variant.id
-      assign temp_variant_obj = temp_variant_obj | merge: 'gid', variant.gid
-      assign temp_variant_obj = temp_variant_obj | merge: 'title', variant.title
-      assign temp_variant_obj = temp_variant_obj | merge: 'image', variant.image | image_url: width: 200
-      assign temp_variant_obj = temp_variant_obj | merge: 'featured_image_url', variant.featured_image | image_url: width: 600
-      assign temp_variant_obj = temp_variant_obj | merge: 'price', variant.price
-      assign temp_variant_obj = temp_variant_obj | merge: 'compare_at_price', variant.compare_at_price
+  assign collection_for_flavors = collections[block.settings.collection_for_flavor_metafields]
 
-      assign metafields_data = '{}' | parse_json
-      assign metafields_data = metafields_data | merge: 'flavor_description', variant.metafields.custom.flavor_description | default: block.settings.default_flavor_description
-      assign metafields_data = metafields_data | merge: 'nutritional_information', variant.metafields.custom.nutritional_information | default: ''
-      assign metafields_data = metafields_data | merge: 'variant_flag', variant.metafields.custom.variant_flag | default: ''
-      assign metafields_data = metafields_data | merge: 'servings', variant.metafields.custom.servings | default: ''
-      assign metafields_data = metafields_data | merge: 'primary_color', variant.metafields.custom.primary_color | default: block.settings.badge_1_bg_color
-      assign metafields_data = metafields_data | merge: 'secondary_color', variant.metafields.custom.secondary_color | default: block.settings.badge_2_bg_color
-      assign temp_variant_obj = temp_variant_obj | merge: 'metafields', metafields_data
-
-      assign temp_variants_array = temp_variants_array | add_object: temp_variant_obj
-    endfor
-    assign variants_json_data = temp_variants_array | json
-  endif
+  assign default_bag_count = block.settings.default_bag_count | default: 3
+  assign currency_code = cart.currency.iso_code | default: "USD"
 -%}
+{% comment %} Global Liquid Logic End {% endcomment %}
+
+<script type="application/json" id="flavorMetafields-{{ rob_custom }}">
+{
+  {%- assign has_metafields = false -%}
+  {%- if collection_for_flavors != blank and collection_for_flavors.products_count > 0 -%}
+    {%- for p_item in collection_for_flavors.products -%}
+      {%- for variant in p_item.variants -%}
+        {%- if variant.metafields.custom.flavor_description != blank -%}
+          {%- assign has_metafields = true -%}
+          "{{ variant.id }}": {{ variant.metafields.custom.flavor_description | json }}{%- unless forloop.last and forloop.parentloop.last %},{% endunless -%}
+        {%- elsif variant.metafields.my_fields.flavor_description != blank -%}
+          {% comment %} Common alternative namespace {% endcomment %}
+          {%- assign has_metafields = true -%}
+          "{{ variant.id }}": {{ variant.metafields.my_fields.flavor_description | json }}{%- unless forloop.last and forloop.parentloop.last %},{% endunless -%}
+        {%- else -%}
+          "{{ variant.id }}": {{ "No flavor description available." | json }}{%- unless forloop.last and forloop.parentloop.last %},{% endunless -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endfor -%}
+  {%- elsif box_product_for_skio_obj and box_product_for_skio_obj.variants.size > 0 -%}
+    {%- for variant in box_product_for_skio_obj.variants -%}
+      {%- if variant.metafields.custom.flavor_description != blank -%}
+        {%- assign has_metafields = true -%}
+        "{{ variant.id }}": {{ variant.metafields.custom.flavor_description | json }}{%- unless forloop.last %},{% endunless -%}
+      {%- elsif variant.metafields.my_fields.flavor_description != blank -%}
+        {%- assign has_metafields = true -%}
+        "{{ variant.id }}": {{ variant.metafields.my_fields.flavor_description | json }}{%- unless forloop.last %},{% endunless -%}
+      {%- else -%}
+        "{{ variant.id }}": {{ "No flavor description available." | json }}{%- unless forloop.last %},{% endunless -%}
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endif -%}
+}
+</script>
 
 {%- style -%}
-  .dynamic-box-container-{{ rob_custom }} {
-    font-family: {{ block.settings.font_family.value | default: 'Arial, sans-serif' }};
-    color: {{ block.settings.text_color }};
-    background-color: {{ block.settings.background_color }};
-    padding: {{ block.settings.padding_block_start }}px {{ block.settings.padding_block_end }}px {{ block.settings.padding_inline_start }}px {{ block.settings.padding_inline_end }}px;
+  .rf-bab-form-block-{{ rob_custom }} {
+    --rf-bab-primary-color-{{ rob_custom }}: {{ block.settings.primary_color }};
+    --rf-bab-primary-text-color-{{ rob_custom }}: {{ block.settings.primary_text_color }};
+    --rf-bab-secondary-color-{{ rob_custom }}: {{ block.settings.secondary_color }};
+    --rf-bab-text-color-{{ rob_custom }}: {{ block.settings.text_color }};
+    --rf-bab-light-text-color-{{ rob_custom }}: {{ block.settings.light_text_color }};
+    --rf-bab-border-color-{{ rob_custom }}: {{ block.settings.border_color }};
+    --rf-bab-background-color-{{ rob_custom }}: {{ block.settings.background_color }};
+    --rf-bab-error-color-{{ rob_custom }}: {{ block.settings.error_color }};
+    --rf-bab-success-color-{{ rob_custom }}: {{ block.settings.success_color }};
+    --rf-bab-info-color-{{ rob_custom }}: {{ block.settings.info_color }};
+    --rf-bab-font-family-{{ rob_custom }}: {{ block.settings.font.family }}, {{ block.settings.font.fallback_families }};
+    
+    font-family: var(--rf-bab-font-family-{{ rob_custom }});
+    background-color: var(--rf-bab-background-color-{{ rob_custom }});
+    padding: {{ block.settings.block_padding }}px;
+    border-radius: {{ block.settings.block_border_radius }}px;
+    border: {{ block.settings.block_border_width }}px solid {{ block.settings.block_border_color }};
     max-width: {{ block.settings.max_width }}px;
     margin: 0 auto;
   }
 
-  .quantity-options-{{ rob_custom }} {
-    display: flex;
-    flex-wrap: wrap;
-    gap: {{ block.settings.qty_option_gap }}px;
+  .bag-selection-container-{{ rob_custom }} {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: {{ block.settings.bag_option_gap }}px;
     margin-bottom: {{ block.settings.section_spacing }}px;
   }
 
-  .quantity-option-btn-{{ rob_custom }} {
-    flex: 1 1 calc(50% - {{ block.settings.qty_option_gap | divided_by: 2 }}px); /* 2 columns */
-    padding: {{ block.settings.qty_option_padding_y }}px {{ block.settings.qty_option_padding_x }}px;
-    border: 1px solid {{ block.settings.qty_option_border_color }};
-    border-radius: {{ block.settings.qty_option_border_radius }}px;
-    background-color: {{ block.settings.qty_option_bg_color }};
-    color: {{ block.settings.qty_option_text_color }};
+  .bag-option-{{ rob_custom }} {
+    position: relative;
+    border: {{ block.settings.bag_option_border_width }}px solid var(--rf-bab-border-color-{{ rob_custom }});
+    border-radius: {{ block.settings.bag_option_border_radius }}px;
+    padding: {{ block.settings.bag_option_padding_y }}px {{ block.settings.bag_option_padding_x }}px;
     text-align: center;
     cursor: pointer;
-    font-size: {{ block.settings.qty_option_font_size }}px;
-    position: relative;
-    transition: background-color 0.3s, border-color 0.3s, color 0.3s;
+    background-color: {{ block.settings.bag_option_bg_color }};
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+    font-size: {{ block.settings.bag_option_font_size }}px;
+    font-weight: {{ block.settings.bag_option_font_weight }};
+    transition: border-color 0.3s ease, background-color 0.3s ease;
+    min-height: 50px; /* From example */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
   }
 
-  .quantity-option-btn-{{ rob_custom }}.active-{{ rob_custom }} {
-    background-color: {{ block.settings.qty_option_bg_active_color }};
-    color: {{ block.settings.qty_option_text_active_color }};
-    border-color: {{ block.settings.qty_option_border_active_color }};
-    font-weight: bold;
-  }
-  .quantity-option-btn-{{ rob_custom }}.best-deal-{{ rob_custom }} .best-deal-badge-{{ rob_custom }} {
-    display: inline-block;
+  .bag-option-{{ rob_custom }}:hover {
+    border-color: var(--rf-bab-primary-color-{{ rob_custom }});
   }
 
-  .best-deal-badge-{{ rob_custom }} {
-    display: none;
+  .bag-option-{{ rob_custom }}.selected-{{ rob_custom }} {
+    border-color: var(--rf-bab-primary-color-{{ rob_custom }});
+    background-color: {{ block.settings.bag_option_selected_bg_color }};
+    color: {{ block.settings.bag_option_selected_text_color }};
+    border-width: {{ block.settings.bag_option_selected_border_width }}px;
+  }
+
+  .deal-badge-{{ rob_custom }} {
     position: absolute;
-    top: -10px;
+    top: -10px; /* From example */
     left: 50%;
     transform: translateX(-50%);
     background-color: {{ block.settings.best_deal_badge_bg_color }};
     color: {{ block.settings.best_deal_badge_text_color }};
-    padding: 2px 8px;
-    font-size: {{ block.settings.best_deal_badge_font_size }}px;
+    padding: 2px 6px;
     border-radius: {{ block.settings.best_deal_badge_border_radius }}px;
-    font-weight: bold;
+    font-size: {{ block.settings.best_deal_badge_font_size }}px;
+    font-weight: 600;
+    white-space: nowrap;
   }
 
-  .purchase-options-{{ rob_custom }} {
+  .bag-count-{{ rob_custom }} {
+    /* styles for bag count text if needed */
+  }
+
+  .purchase-options-container-{{ rob_custom }} {
+    display: flex;
+    flex-direction: column;
+    gap: {{ block.settings.purchase_option_gap }}px;
     margin-bottom: {{ block.settings.section_spacing }}px;
   }
-  .first-order-banner-{{ rob_custom }} {
-    background-color: {{ block.settings.first_order_banner_bg }};
-    color: {{ block.settings.first_order_banner_text_color }};
-    padding: 8px 15px;
-    text-align: center;
-    font-size: {{ block.settings.first_order_banner_font_size }}px;
-    font-weight: bold;
-    border-radius: {{ block.settings.purchase_option_border_radius }}px {{ block.settings.purchase_option_border_radius }}px 0 0;
-    margin-bottom: -1px; /* To overlap border */
-  }
 
-  .purchase-option-{{ rob_custom }} {
-    border: 1px solid {{ block.settings.purchase_option_border_color }};
+  .purchase-type-button-{{ rob_custom }} {
+    border: 1px solid var(--rf-bab-border-color-{{ rob_custom }});
     border-radius: {{ block.settings.purchase_option_border_radius }}px;
     padding: {{ block.settings.purchase_option_padding_y }}px {{ block.settings.purchase_option_padding_x }}px;
     cursor: pointer;
-    transition: background-color 0.3s, border-color 0.3s;
+    background-color: {{ block.settings.purchase_option_bg_color }};
+    transition: border-color 0.3s ease, background-color 0.3s ease;
   }
-  .purchase-option-{{ rob_custom }}:first-of-type { /* Subscribe option */
-     border-radius: 0 0 {{ block.settings.purchase_option_border_radius }}px {{ block.settings.purchase_option_border_radius }}px; /* Adjust if banner present */
-  }
-   .purchase-option-{{ rob_custom }}.no-banner-radius-{{ rob_custom }} { /* Subscribe option without banner */
-     border-radius: {{ block.settings.purchase_option_border_radius }}px;
-  }
-
-  .purchase-option-{{ rob_custom }}.onetime-{{ rob_custom }} {
-    margin-top: {{ block.settings.qty_option_gap }}px; /* Same as gap for consistency */
+  
+  .purchase-type-button-{{ rob_custom }}.selected-{{ rob_custom }} {
+    border-color: var(--rf-bab-primary-color-{{ rob_custom }});
+    background-color: {{ block.settings.purchase_option_selected_bg_color }};
   }
 
-  .purchase-option-{{ rob_custom }}.active-{{ rob_custom }} {
-    background-color: {{ block.settings.purchase_option_bg_active_color }};
-    border-color: {{ block.settings.purchase_option_border_active_color }};
-    box-shadow: 0 0 0 2px {{ block.settings.purchase_option_border_active_color }}; /* Example focus */
-  }
-
-  .purchase-option-header-{{ rob_custom }} {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-weight: bold;
-    font-size: {{ block.settings.purchase_option_title_font_size }}px;
-  }
-  .purchase-option-title-{{ rob_custom }} {
-    color: {{ block.settings.purchase_option_title_color }};
-  }
-  .purchase-option-price-{{ rob_custom }} {
-    color: {{ block.settings.purchase_option_price_color }};
-  }
-  .purchase-option-price-{{ rob_custom }} .original-price-{{ rob_custom }} {
-    text-decoration: line-through;
-    color: {{ block.settings.original_price_color }};
-    margin-right: 8px;
-    font-size: 0.9em;
-  }
-  .purchase-option-details-{{ rob_custom }} {
-    font-size: {{ block.settings.purchase_option_details_font_size }}px;
-    color: {{ block.settings.purchase_option_details_color }};
-    margin-top: 8px;
-  }
-  .purchase-option-details-{{ rob_custom }} div {
-    display: flex;
-    align-items: center;
-    margin-bottom: 4px;
-  }
-  .purchase-option-details-{{ rob_custom }} .checkmark-{{ rob_custom }} {
-    color: {{ block.settings.checkmark_color }};
-    margin-right: 8px;
-    font-weight: bold;
-  }
-
-  .select-flavors-header-{{ rob_custom }} {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: {{ block.settings.section_spacing | divided_by: 2 }}px;
-    padding: 10px;
-    background-color: {{ block.settings.flavor_header_bg_color }};
-    border-radius: {{ block.settings.flavor_item_border_radius }}px;
-  }
-  .select-flavors-title-{{ rob_custom }} {
-    font-size: {{ block.settings.flavor_section_title_size }}px;
-    font-weight: bold;
-    color: {{ block.settings.flavor_section_title_color }};
-  }
-  .flavors-to-go-{{ rob_custom }} {
-    font-size: {{ block.settings.flavor_to_go_font_size }}px;
-    color: {{ block.settings.flavor_to_go_text_color }};
-    background-color: {{ block.settings.flavor_to_go_bg_color }};
-    padding: 5px 10px;
-    border-radius: {{ block.settings.flavor_to_go_border_radius }}px;
-  }
-
-  .flavor-list-{{ rob_custom }} {
-    display: flex;
-    flex-direction: column;
-    gap: {{ block.settings.flavor_item_gap }}px;
-    margin-bottom: {{ block.settings.section_spacing }}px;
-  }
-
-  .flavor-item-{{ rob_custom }} {
-    display: flex;
-    align-items: center;
-    padding: {{ block.settings.flavor_item_padding }}px;
-    border: 1px solid {{ block.settings.flavor_item_border_color }};
-    border-radius: {{ block.settings.flavor_item_border_radius }}px;
-    background-color: {{ block.settings.flavor_item_bg_color }};
-  }
-  .flavor-item-{{ rob_custom }} img {
-    width: {{ block.settings.flavor_img_size }}px;
-    height: {{ block.settings.flavor_img_size }}px;
-    object-fit: cover;
-    margin-right: 15px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .flavor-info-{{ rob_custom }} {
-    flex-grow: 1;
-  }
-  .flavor-title-{{ rob_custom }} {
-    font-size: {{ block.settings.flavor_title_size }}px;
-    font-weight: bold;
-    color: {{ block.settings.flavor_title_color }};
-    cursor: pointer;
-  }
-  .flavor-description-{{ rob_custom }} {
-    font-size: {{ block.settings.flavor_desc_size }}px;
-    color: {{ block.settings.flavor_desc_color }};
-    margin-top: 4px;
-  }
-  .flavor-qty-controls-{{ rob_custom }} {
-    display: flex;
-    align-items: center;
-  }
-  .flavor-qty-btn-{{ rob_custom }} {
-    background-color: {{ block.settings.flavor_qty_btn_bg_color }};
-    color: {{ block.settings.flavor_qty_btn_text_color }};
-    border: 1px solid {{ block.settings.flavor_qty_btn_border_color }};
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 18px;
-  }
-  .flavor-qty-{{ rob_custom }} {
-    margin: 0 10px;
-    font-size: 16px;
-    min-width: 20px;
+  .subscribe-banner-{{ rob_custom }} {
+    background-color: {{ block.settings.subscribe_banner_bg_color }};
+    color: {{ block.settings.subscribe_banner_text_color }};
+    padding: 6px 10px;
     text-align: center;
-  }
-  .flavor-add-btn-{{ rob_custom }} {
-    background-color: {{ block.settings.flavor_add_btn_bg_color }};
-    color: {{ block.settings.flavor_add_btn_text_color }};
-    border: 1px solid {{ block.settings.flavor_add_btn_border_color }};
-    border-radius: {{ block.settings.flavor_add_btn_border_radius }}px;
-    padding: 8px 15px;
-    cursor: pointer;
+    font-size: {{ block.settings.subscribe_banner_font_size }}px;
     font-weight: bold;
+    border-radius: {{ block.settings.purchase_option_border_radius }}px {{ block.settings.purchase_option_border_radius }}px 0 0; /* Adjust if needed */
+    margin: -{{ block.settings.purchase_option_padding_y }}px -{{ block.settings.purchase_option_padding_x }}px {{ block.settings.purchase_option_padding_y }}px; /* Pull to edges */
   }
 
-  .summary-section-{{ rob_custom }} {
-    padding: {{ block.settings.summary_padding }}px;
-    background-color: {{ block.settings.summary_bg_color }};
-    border-radius: {{ block.settings.summary_border_radius }}px;
-    margin-bottom: {{ block.settings.section_spacing }}px;
-    border: 1px solid {{ block.settings.summary_border_color }};
-  }
-  .summary-line-{{ rob_custom }} {
+  .purchase-header-{{ rob_custom }} {
     display: flex;
     justify-content: space-between;
-    font-size: {{ block.settings.summary_text_size }}px;
+    align-items: center;
     margin-bottom: 8px;
   }
-  .summary-line-{{ rob_custom }}.savings-{{ rob_custom }} {
-    color: {{ block.settings.savings_text_color }};
-    font-weight: bold;
+
+  .purchase-type-label-{{ rob_custom }} {
+    font-size: {{ block.settings.purchase_label_font_size }}px;
+    font-weight: {{ block.settings.purchase_label_font_weight }};
+    color: var(--rf-bab-text-color-{{ rob_custom }});
   }
-  .subtotal-label-{{ rob_custom }} {
-    color: {{ block.settings.subtotal_label_color }};
-  }
-  .subtotal-value-{{ rob_custom }} {
-    color: {{ block.settings.subtotal_value_color }};
-    font-weight: bold;
+  .purchase-type-button-{{ rob_custom }}.selected-{{ rob_custom }} .purchase-type-label-{{ rob_custom }} {
+    color: {{ block.settings.purchase_label_selected_text_color }};
   }
 
 
-  .add-to-cart-btn-{{ rob_custom }} {
-    width: 100%;
-    padding: {{ block.settings.atc_padding_y }}px {{ block.settings.atc_padding_x }}px;
-    border-radius: {{ block.settings.atc_border_radius }}px;
-    font-size: {{ block.settings.atc_font_size }}px;
-    font-weight: bold;
-    text-align: center;
-    cursor: pointer;
-    border: none;
-    transition: background-color 0.3s, color 0.3s;
-  }
-  .add-to-cart-btn-{{ rob_custom }}.enabled-{{ rob_custom }} {
-    background-color: {{ block.settings.atc_bg_color }};
-    color: {{ block.settings.atc_text_color }};
-  }
-  .add-to-cart-btn-{{ rob_custom }}.disabled-{{ rob_custom }} {
-    background-color: {{ block.settings.atc_bg_disabled_color }};
-    color: {{ block.settings.atc_text_disabled_color }};
-    cursor: not-allowed;
-  }
-
-  /* Modal Styles */
-  .modal-{{ rob_custom }} {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background-color: {{ block.settings.modal_overlay_color }};
-  }
-  .modal-content-{{ rob_custom }} {
-    background-color: {{ block.settings.modal_bg_color }};
-    color: {{ block.settings.modal_text_color }};
-    margin: 10% auto;
-    padding: {{ block.settings.modal_padding }}px;
-    border: 1px solid {{ block.settings.modal_border_color }};
-    border-radius: {{ block.settings.modal_border_radius }}px;
-    width: 80%;
-    max-width: {{ block.settings.modal_max_width }}px;
-    position: relative;
-  }
-  .modal-close-{{ rob_custom }} {
-    color: {{ block.settings.modal_close_btn_color }};
-    float: right;
-    font-size: 28px;
-    font-weight: bold;
-    cursor: pointer;
-  }
-  .modal-close-{{ rob_custom }}:hover,
-  .modal-close-{{ rob_custom }}:focus {
-    color: darken({{ block.settings.modal_close_btn_color }}, 10%);
-    text-decoration: none;
-  }
-  .modal-body-{{ rob_custom }} {
-    /* Add styles for modal content layout if needed */
-  }
-  .modal-image-{{ rob_custom }} {
-    width: 100%;
-    max-width: 300px; /* Or as per setting */
-    height: auto;
-    margin: 0 auto 20px auto;
-    display: block;
-    border-radius: 8px;
-  }
-  .modal-product-title-{{ rob_custom }} {
-    font-size: {{ block.settings.modal_main_title_size }}px;
-    font-weight: bold;
-    color: {{ block.settings.modal_main_title_color }};
-    text-align: center;
-    margin-bottom: 5px;
-  }
-  .modal-flavor-title-{{ rob_custom }} {
-    font-size: {{ block.settings.modal_flavor_title_size }}px;
-    font-weight: bold;
-    color: {{ block.settings.modal_flavor_title_color }};
-    text-align: center;
-    margin-bottom: 15px;
-  }
-  .modal-flavor-description-{{ rob_custom }} {
-    font-size: {{ block.settings.modal_desc_size }}px;
-    color: {{ block.settings.modal_desc_color }};
-    margin-bottom: 20px;
-    text-align: center;
-  }
-  .modal-badges-{{ rob_custom }} {
+  .price-display-{{ rob_custom }} {
     display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
   }
-  .modal-badge-{{ rob_custom }} {
-    padding: 5px 12px;
-    border-radius: {{ block.settings.badge_border_radius }}px;
-    font-size: {{ block.settings.badge_font_size }}px;
-    color: {{ block.settings.badge_font_color }};
-    font-weight: 500;
+
+  .original-price-{{ rob_custom }} {
+    font-size: {{ block.settings.original_price_font_size }}px;
+    color: var(--rf-bab-light-text-color-{{ rob_custom }});
+    text-decoration: line-through;
   }
-  .see-label-accordion-{{ rob_custom }} {
-    margin-top: 20px;
-    border: 1px solid {{ block.settings.accordion_border_color }};
-    border-radius: {{ block.settings.accordion_border_radius }}px;
+  .purchase-type-button-{{ rob_custom }}.onetime-button-{{ rob_custom }} .original-price-{{ rob_custom }} {
+    display: none; /* Typically one-time purchase doesn't show strikethrough unless it's also discounted */
   }
-  .see-label-header-{{ rob_custom }} {
-    background-color: {{ block.settings.accordion_header_bg_color }};
-    color: {{ block.settings.accordion_header_text_color }};
-    padding: 10px 15px;
-    cursor: pointer;
+  .purchase-type-button-{{ rob_custom }}.onetime-button-{{ rob_custom }}.has-discount-{{ rob_custom }} .original-price-{{ rob_custom }} {
+    display: inline; /* Show if one-time also has a discount */
+  }
+
+
+  .current-price-{{ rob_custom }} {
+    font-size: {{ block.settings.current_price_font_size }}px;
+    font-weight: {{ block.settings.current_price_font_weight }};
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+  }
+  .purchase-type-button-{{ rob_custom }}.selected-{{ rob_custom }} .current-price-{{ rob_custom }} {
+     color: {{ block.settings.current_price_selected_text_color }};
+  }
+
+
+  .benefits-list-{{ rob_custom }} {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 4px {{ block.settings.benefit_item_gap }}px;
+    font-size: {{ block.settings.benefit_font_size }}px;
+    color: {{ block.settings.benefit_text_color }};
+  }
+  .purchase-type-button-{{ rob_custom }}.selected-{{ rob_custom }} .benefits-list-{{ rob_custom }} {
+    color: {{ block.settings.benefit_selected_text_color }};
+  }
+
+  .benefit-item-{{ rob_custom }} {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .checkmark-icon-{{ rob_custom }} {
+    width: {{ block.settings.benefit_checkmark_size }}px;
+    height: {{ block.settings.benefit_checkmark_size }}px;
+    stroke: {{ block.settings.benefit_checkmark_color }}; /* currentColor can be used if text color should apply */
+    flex-shrink: 0;
+  }
+  .purchase-type-button-{{ rob_custom }}.selected-{{ rob_custom }} .checkmark-icon-{{ rob_custom }} {
+    stroke: {{ block.settings.benefit_checkmark_selected_color }};
+  }
+
+  .flavor-selection-area-{{ rob_custom }} {
+    margin-bottom: {{ block.settings.section_spacing }}px;
+  }
+
+  .flavor-header-{{ rob_custom }} {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-radius: {{ block.settings.accordion_border_radius }}px {{ block.settings.accordion_border_radius }}px 0 0; /* if content below */
-  }
-   .see-label-header-{{ rob_custom }}.open-{{ rob_custom }} {
-    border-bottom: 1px solid {{ block.settings.accordion_border_color }};
-    border-radius: {{ block.settings.accordion_border_radius }}px {{ block.settings.accordion_border_radius }}px 0 0;
-  }
-  .see-label-header-{{ rob_custom }}:not(.open-{{ rob_custom }}) {
-    border-radius: {{ block.settings.accordion_border_radius }}px;
-  }
-  .see-label-content-{{ rob_custom }} {
-    padding: 15px;
-    background-color: {{ block.settings.accordion_content_bg_color }};
-    color: {{ block.settings.accordion_content_text_color }};
-    border-radius: 0 0 {{ block.settings.accordion_border_radius }}px {{ block.settings.accordion_border_radius }}px;
-    display: none; /* Hidden by default */
-  }
-  .see-label-content-{{ rob_custom }}.open-{{ rob_custom }} {
-    display: block;
-  }
-  .accordion-arrow-{{ rob_custom }} {
-    transition: transform 0.3s ease;
-  }
-  .accordion-arrow-{{ rob_custom }}.open-{{ rob_custom }} {
-    transform: rotate(180deg);
+    margin-bottom: {{ block.settings.flavor_header_margin_bottom }}px;
   }
 
-  /* Utility */
-  .hidden-{{ rob_custom }} {
-    display: none !important;
+  .flavor-title-{{ rob_custom }} {
+    font-size: {{ block.settings.flavors_title_font_size }}px;
+    font-weight: {{ block.settings.flavors_title_font_weight }};
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+    margin: 0;
   }
 
-  /* Responsive adjustments */
-  @media (max-width: 768px) {
-    .quantity-option-btn-{{ rob_custom }} {
-      /* flex-basis: 100%; Could make them full width on mobile if desired */
-    }
-    .flavor-item-{{ rob_custom }} {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-    .flavor-item-{{ rob_custom }} img {
-      margin-bottom: 10px;
-      margin-right: 0;
-      width: 80px; /* smaller on mobile */
-      height: 80px;
-    }
-    .flavor-qty-controls-{{ rob_custom }} {
-      margin-top: 10px;
-      width: 100%;
-      justify-content: flex-end;
-    }
-    .modal-content-{{ rob_custom }} {
-      width: 90%;
-      margin: 5% auto;
-      padding: {{ block.settings.modal_padding | divided_by: 1.5 }}px;
-    }
+  .flavor-status-message-{{ rob_custom }} {
+    font-size: {{ block.settings.flavor_status_font_size }}px;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+  .flavor-status-message-{{ rob_custom }}.error-{{ rob_custom }} {
+    background-color: {{ block.settings.error_message_bg_color }};
+    color: var(--rf-bab-error-color-{{ rob_custom }});
+  }
+  .flavor-status-message-{{ rob_custom }}.info-{{ rob_custom }} {
+    background-color: {{ block.settings.info_message_bg_color }};
+    color: var(--rf-bab-info-color-{{ rob_custom }});
+  }
+
+  .flavors-grid-{{ rob_custom }} {
+    display: grid;
+    gap: {{ block.settings.flavor_card_gap }}px;
+  }
+  .loading-flavors-{{ rob_custom }} {
+    text-align: center;
+    padding: 20px;
+    color: var(--rf-bab-light-text-color-{{ rob_custom }});
+  }
+
+  .flavor-card-{{ rob_custom }} {
+    display: grid;
+    grid-template-columns: auto 1fr auto; /* image, info, controls */
+    gap: 12px; /* from example */
+    align-items: center;
+    border: 1px solid var(--rf-bab-border-color-{{ rob_custom }});
+    border-radius: {{ block.settings.flavor_card_border_radius }}px;
+    padding: {{ block.settings.flavor_card_padding }}px;
+    background-color: {{ block.settings.flavor_card_bg_color }};
+  }
+  /* .flavor-card-{{ rob_custom }}:hover {
+    border-color: var(--rf-bab-primary-color-{{ rob_custom }});
+  } */ /* This was from old example, target images don't clearly show hover on cards */
+
+
+  .flavor-image-{{ rob_custom }} img { /* if images were shown */
+    width: 60px; height: 60px; object-fit: cover; border-radius: 4px;
+  }
+
+  .flavor-info-{{ rob_custom }} {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+  }
+
+  .flavor-name-{{ rob_custom }} {
+    font-size: {{ block.settings.flavor_name_font_size }}px;
+    font-weight: {{ block.settings.flavor_name_font_weight }};
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .flavor-description-{{ rob_custom }} {
+    font-size: {{ block.settings.flavor_description_font_size }}px;
+    color: var(--rf-bab-light-text-color-{{ rob_custom }});
+    line-height: 1.4;
+    /* max 2 lines with ellipsis if desired */
+  }
+
+  .flavor-controls-{{ rob_custom }} {
+    display: flex;
+    align-items: center;
+    width: {{ block.settings.flavor_controls_width }}px; /* e.g. 100px */
+  }
+
+  .flavor-add-button-{{ rob_custom }} {
+    background-color: var(--rf-bab-primary-color-{{ rob_custom }});
+    color: var(--rf-bab-primary-text-color-{{ rob_custom }});
+    border: none;
+    border-radius: {{ block.settings.button_border_radius }}px;
+    padding: {{ block.settings.small_button_padding_y }}px {{ block.settings.small_button_padding_x }}px;
+    font-size: {{ block.settings.small_button_font_size }}px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    width: 100%;
+  }
+  .flavor-add-button-{{ rob_custom }}:hover {
+    background-color: {{ block.settings.primary_color_hover }};
+  }
+
+  .quantity-stepper-{{ rob_custom }} {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--rf-bab-border-color-{{ rob_custom }});
+    border-radius: {{ block.settings.button_border_radius }}px;
+    width: 100%;
+  }
+
+  .quantity-stepper-{{ rob_custom }} button {
+    background-color: {{ block.settings.stepper_button_bg_color }};
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+    border: none;
+    width: 30px; /* Adjust as needed */
+    height: 30px; /* Adjust as needed */
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .quantity-stepper-{{ rob_custom }} button:first-child {
+    border-right: 1px solid var(--rf-bab-border-color-{{ rob_custom }});
+    border-radius: {{ block.settings.button_border_radius }}px 0 0 {{ block.settings.button_border_radius }}px;
+  }
+  .quantity-stepper-{{ rob_custom }} button:last-child {
+    border-left: 1px solid var(--rf-bab-border-color-{{ rob_custom }});
+    border-radius: 0 {{ block.settings.button_border_radius }}px {{ block.settings.button_border_radius }}px 0;
+  }
+   .quantity-stepper-{{ rob_custom }} button:hover {
+    background-color: {{ block.settings.stepper_button_hover_bg_color }};
+   }
+
+
+  .quantity-stepper-{{ rob_custom }} input {
+    width: 100%; /* Takes remaining space */
+    text-align: center;
+    border: none;
+    font-size: {{ block.settings.flavor_quantity_font_size }}px;
+    font-weight: bold;
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+    padding: 0 5px;
+    background: transparent;
+    -moz-appearance: textfield;
+    outline: none;
+  }
+  .quantity-stepper-{{ rob_custom }} input::-webkit-outer-spin-button,
+  .quantity-stepper-{{ rob_custom }} input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .form-footer-{{ rob_custom }} {
+    margin-top: {{ block.settings.section_spacing }}px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* Gap between subtotal/savings and ATC button */
+  }
+
+  .subtotal-summary-{{ rob_custom }},
+  .savings-summary-{{ rob_custom }} {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: {{ block.settings.summary_font_size }}px;
+  }
+  .subtotal-label-{{ rob_custom }} {
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+  }
+  .subtotal-value-{{ rob_custom }} {
+    font-weight: bold;
+    color: var(--rf-bab-text-color-{{ rob_custom }});
+  }
+  .savings-summary-{{ rob_custom }} {
+    background-color: {{ block.settings.savings_badge_bg_color }};
+    color: {{ block.settings.savings_badge_text_color }};
+    padding: {{ block.settings.savings_badge_padding_y }}px {{ block.settings.savings_badge_padding_x }}px;
+    border-radius: {{ block.settings.savings_badge_border_radius }}px;
+    font-weight: bold;
+  }
+  .savings-value-{{ rob_custom }} {
+    /* Wrapper for prefix + amount */
+  }
+
+
+  .add-to-cart-button-{{ rob_custom }} {
+    background-color: var(--rf-bab-primary-color-{{ rob_custom }});
+    color: var(--rf-bab-primary-text-color-{{ rob_custom }});
+    border: none;
+    border-radius: {{ block.settings.button_border_radius }}px;
+    padding: {{ block.settings.atc_button_padding_y }}px {{ block.settings.atc_button_padding_x }}px;
+    font-size: {{ block.settings.atc_button_font_size }}px;
+    font-weight: {{ block.settings.atc_button_font_weight }};
+    cursor: pointer;
+    width: 100%;
+    transition: background-color 0.3s ease, opacity 0.3s ease;
+    text-align: center;
+  }
+  .add-to-cart-button-{{ rob_custom }}:hover:not(:disabled) {
+    background-color: {{ block.settings.primary_color_hover }};
+  }
+  .add-to-cart-button-{{ rob_custom }}:disabled {
+    background-color: {{ block.settings.button_disabled_bg_color }};
+    color: {{ block.settings.button_disabled_text_color }};
+    cursor: not-allowed;
+    opacity: 0.7;
   }
 
 {%- endstyle -%}
 
-<div class="dynamic-box-container-{{ rob_custom }}" {{ block.shopify_attributes }}>
-  <dynamic-box-{{ rob_custom }}
-    id="dynamic-box-component-{{ rob_custom }}"
-    data-rob-custom="{{ rob_custom }}"
-    data-box-product-gid="{{ box_product_gid_for_api }}"
-    data-variants-json="{{ variants_json_data | escape }}"
+<div class="rf-bab-form-block-{{ rob_custom }}" {{ block.shopify_attributes }}>
+  <rf-bab-form-component-{{ rob_custom }}
+    data-ai-gen-id="{{ rob_custom }}"
+    data-box-product-id="{{ box_product_id_js }}"
+    data-default-bag-count="{{ default_bag_count }}"
+    data-currency-code="{{ currency_code }}"
     data-settings="{{ block.settings | json | escape }}"
-    data-currency-code="{{ cart.currency.iso_code | default: 'USD' }}"
   >
-    <div class="loading-state-{{ rob_custom }}">
-      <p>{{ block.settings.loading_text }}</p>
+    {% comment %} Bag Quantity Selection {% endcomment %}
+    <div class="bag-selection-container-{{ rob_custom }}">
+      {%- for i in (1..4) reversed -%}
+        {%- assign bags = i -%}
+        <button
+          class="bag-option-{{ rob_custom }} {%- if default_bag_count == bags %} selected-{{ rob_custom }}{% endif %} {%- if bags == 4 and block.settings.show_best_deal_badge %} best-deal-{{ rob_custom }}{% endif -%}"
+          data-bags="{{ bags }}"
+          type="button"
+        >
+          {%- if bags == 4 and block.settings.show_best_deal_badge -%}
+            <span class="deal-badge-{{ rob_custom }}">{{ block.settings.best_deal_badge_text }}</span>
+          {%- endif -%}
+          <span class="bag-count-{{ rob_custom }}">
+            {{ bags }} {{ block.settings.bag_label_singular }}{% if bags != 1 %}{{ block.settings.bag_label_plural_suffix }}{% endif %}
+          </span>
+        </button>
+      {%- endfor -%}
     </div>
 
-    <div class="content-wrapper-{{ rob_custom }} hidden-{{ rob_custom }}">
-      <!-- Quantity Options -->
-      <div class="quantity-options-{{ rob_custom }}" id="quantity-options-{{ rob_custom }}"></div>
-
-      <!-- Purchase Type Options -->
-      <div class="purchase-options-{{ rob_custom }}">
-        {% if block.settings.show_first_order_banner and block.settings.first_order_banner_text != blank %}
-          <div class="first-order-banner-{{ rob_custom }}" id="first-order-banner-{{ rob_custom }}">
-            {{ block.settings.first_order_banner_text }}
-          </div>
-        {% endif %}
-        <div class="purchase-option-{{ rob_custom }} subscribe-{{ rob_custom }}" id="purchase-option-subscribe-{{ rob_custom }}" data-type="subscribe">
-          <div class="purchase-option-header-{{ rob_custom }}">
-            <span class="purchase-option-title-{{ rob_custom }}">{{ block.settings.subscribe_save_title }}</span>
-            <span class="purchase-option-price-{{ rob_custom }}">
-              <span class="original-price-{{ rob_custom }}" id="subscribe-original-price-{{ rob_custom }}"></span>
-              <span id="subscribe-discounted-price-{{ rob_custom }}"></span>
-            </span>
-          </div>
-          <div class="purchase-option-details-{{ rob_custom }}">
-            {% if block.settings.subscribe_detail_1 != blank %}<div><span class="checkmark-{{ rob_custom }}">✓</span> {{ block.settings.subscribe_detail_1 }}</div>{% endif %}
-            {% if block.settings.subscribe_detail_2 != blank %}<div><span class="checkmark-{{ rob_custom }}">✓</span> {{ block.settings.subscribe_detail_2 }}</div>{% endif %}
-            {% if block.settings.subscribe_detail_3 != blank %}<div><span class="checkmark-{{ rob_custom }}">✓</span> {{ block.settings.subscribe_detail_3 }}</div>{% endif %}
-            {% if block.settings.future_orders_text != blank %}<div><span class="checkmark-{{ rob_custom }}">✓</span> {{ block.settings.future_orders_text }}</div>{% endif %}
+    {% comment %} Purchase Type Selection {% endcomment %}
+    <div class="purchase-options-container-{{ rob_custom }}">
+      {% comment %} Subscribe & Save Option {% endcomment %}
+      <div class="purchase-type-button-{{ rob_custom }} subscribe-button-{{ rob_custom }} selected-{{ rob_custom }}" data-purchase-type="subscribe">
+        {%- if block.settings.show_subscribe_banner and block.settings.subscribe_banner_text != blank -%}
+          <div class="subscribe-banner-{{ rob_custom }}">{{ block.settings.subscribe_banner_text }}</div>
+        {%- endif -%}
+        <div class="purchase-header-{{ rob_custom }}">
+          <span class="purchase-type-label-{{ rob_custom }}">{{ block.settings.subscribe_title }}</span>
+          <div class="price-display-{{ rob_custom }}">
+            <span class="original-price-{{ rob_custom }}" id="subscribeOriginalPrice-{{ rob_custom }}">$0.00</span>
+            <span class="current-price-{{ rob_custom }}" id="subscribeTotalPrice-{{ rob_custom }}">$0.00</span>
           </div>
         </div>
+        <ul class="benefits-list-{{ rob_custom }}">
+          {%- if block.settings.benefit_1 != blank -%}
+            <li class="benefit-item-{{ rob_custom }}">
+              <svg class="checkmark-icon-{{ rob_custom }}" viewBox="0 0 12 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 4.5L4.5 8L11 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>{{ block.settings.benefit_1 }}</span>
+            </li>
+          {%- endif -%}
+          {%- if block.settings.benefit_2 != blank -%}
+            <li class="benefit-item-{{ rob_custom }}">
+              <svg class="checkmark-icon-{{ rob_custom }}" viewBox="0 0 12 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 4.5L4.5 8L11 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>{{ block.settings.benefit_2 }}</span>
+            </li>
+          {%- endif -%}
+          {%- if block.settings.benefit_3 != blank -%}
+            <li class="benefit-item-{{ rob_custom }}">
+              <svg class="checkmark-icon-{{ rob_custom }}" viewBox="0 0 12 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 4.5L4.5 8L11 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>{{ block.settings.benefit_3 }}</span>
+            </li>
+          {%- endif -%}
+          {%- if block.settings.benefit_4 != blank -%}
+            <li class="benefit-item-{{ rob_custom }}">
+              <svg class="checkmark-icon-{{ rob_custom }}" viewBox="0 0 12 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 4.5L4.5 8L11 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>{{ block.settings.benefit_4 }}</span>
+            </li>
+          {%- endif -%}
+        </ul>
+      </div>
 
-        <div class="purchase-option-{{ rob_custom }} onetime-{{ rob_custom }}" id="purchase-option-onetime-{{ rob_custom }}" data-type="onetime">
-          <div class="purchase-option-header-{{ rob_custom }}">
-            <span class="purchase-option-title-{{ rob_custom }}">{{ block.settings.one_time_purchase_title }}</span>
-            <span class="purchase-option-price-{{ rob_custom }}" id="onetime-price-{{ rob_custom }}"></span>
+      {% comment %} One-time Purchase Option {% endcomment %}
+      <div class="purchase-type-button-{{ rob_custom }} onetime-button-{{ rob_custom }}" data-purchase-type="onetime">
+        <div class="purchase-header-{{ rob_custom }}">
+          <span class="purchase-type-label-{{ rob_custom }}">{{ block.settings.onetime_title }}</span>
+          <div class="price-display-{{ rob_custom }}">
+             <span class="original-price-{{ rob_custom }}" id="onetimeOriginalPrice-{{ rob_custom }}">$0.00</span>
+            <span class="current-price-{{ rob_custom }}" id="onetimeTotalPrice-{{ rob_custom }}">$0.00</span>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- Flavor Selection -->
-      <div class="select-flavors-header-{{ rob_custom }}">
-        <span class="select-flavors-title-{{ rob_custom }}">{{ block.settings.flavor_section_title }}</span>
-        <span class="flavors-to-go-{{ rob_custom }}" id="flavors-to-go-{{ rob_custom }}"></span>
+    {% comment %} Flavor Selection Section {% endcomment %}
+    <div class="flavor-selection-area-{{ rob_custom }}">
+      <div class="flavor-header-{{ rob_custom }}">
+        <h3 class="flavor-title-{{ rob_custom }}">{{ block.settings.flavors_title }}</h3>
+        <span class="flavor-status-message-{{ rob_custom }}" id="flavorStatusMessage-{{ rob_custom }}"></span>
       </div>
-      <div class="flavor-list-{{ rob_custom }}" id="flavor-list-{{ rob_custom }}">
-        <!-- Flavor items will be rendered here by JS -->
+      <div class="flavors-grid-{{ rob_custom }}" id="flavorsGrid-{{ rob_custom }}">
+        <div class="loading-flavors-{{ rob_custom }}">{{ block.settings.loading_flavors_text }}</div>
       </div>
+    </div>
 
-      <!-- Summary -->
-      <div class="summary-section-{{ rob_custom }} hidden-{{ rob_custom }}" id="summary-section-{{ rob_custom }}">
-        <div class="summary-line-{{ rob_custom }}">
-          <span class="subtotal-label-{{ rob_custom }}">{{ block.settings.subtotal_label }}</span>
-          <span class="subtotal-value-{{ rob_custom }}" id="subtotal-value-{{ rob_custom }}"></span>
-        </div>
-        <div class="summary-line-{{ rob_custom }} savings-{{ rob_custom }}">
-          <span id="savings-label-{{ rob_custom }}">{{ block.settings.savings_label }}</span>
-          <span id="savings-value-{{ rob_custom }}"></span>
-        </div>
+    {% comment %} Footer: Subtotal & ATC {% endcomment %}
+    <div class="form-footer-{{ rob_custom }}">
+      <div class="subtotal-summary-{{ rob_custom }}" id="subtotalSummaryContainer-{{ rob_custom }}" style="display: none;">
+        <span class="subtotal-label-{{ rob_custom }}">{{ block.settings.subtotal_label }}</span>
+        <span class="subtotal-value-{{ rob_custom }}" id="subtotalPrice-{{ rob_custom }}">$0.00</span>
       </div>
-
-      <!-- Add to Cart Button -->
-      <button class="add-to-cart-btn-{{ rob_custom }} disabled-{{ rob_custom }}" id="add-to-cart-btn-{{ rob_custom }}" disabled>
-        {{ block.settings.atc_text_select_more }}
+      <div class="savings-summary-{{ rob_custom }}" id="savingsSummaryContainer-{{ rob_custom }}" style="display: none;">
+        <span class="savings-value-{{ rob_custom }}" id="savingsAmountText-{{ rob_custom }}">
+          {{ block.settings.savings_text_prefix }} <span id="savingsAmount-{{ rob_custom }}">$0.00</span>
+        </span>
+      </div>
+      <button
+        type="button"
+        class="add-to-cart-button-{{ rob_custom }}"
+        id="addToCartButton-{{ rob_custom }}"
+        disabled
+      >
+        {{ block.settings.atc_default_text }}
       </button>
     </div>
-
-    <!-- Modal Structure -->
-    <div id="flavor-modal-{{ rob_custom }}" class="modal-{{ rob_custom }}">
-      <div class="modal-content-{{ rob_custom }}">
-        <span class="modal-close-{{ rob_custom }}" id="modal-close-btn-{{ rob_custom }}">×</span>
-        <div class="modal-body-{{ rob_custom }}">
-          <img src="" alt="Flavor Image" class="modal-image-{{ rob_custom }}" id="modal-image-{{ rob_custom }}">
-          <h3 class="modal-product-title-{{ rob_custom }}" id="modal-product-title-{{ rob_custom }}">{{ block.settings.modal_static_product_title }}</h3>
-          <h4 class="modal-flavor-title-{{ rob_custom }}" id="modal-flavor-name-{{ rob_custom }}"></h4>
-          <div class="modal-badges-{{ rob_custom }}" id="modal-badges-{{ rob_custom }}">
-            <!-- Badges rendered by JS -->
-          </div>
-          <p class="modal-flavor-description-{{ rob_custom }}" id="modal-flavor-description-{{ rob_custom }}"></p>
-
-          <div class="see-label-accordion-{{ rob_custom }}">
-            <div class="see-label-header-{{ rob_custom }}" id="see-label-header-{{ rob_custom }}">
-              <span>{{ block.settings.modal_accordion_title }}</span>
-              <span class="accordion-arrow-{{ rob_custom }}">▼</span>
-            </div>
-            <div class="see-label-content-{{ rob_custom }}" id="see-label-content-{{ rob_custom }}">
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-  </dynamic-box-{{ rob_custom }}>
+  </rf-bab-form-component-{{ rob_custom }}>
 </div>
 
 <script>
-  class DynamicBox{{ rob_custom | camelize }} extends HTMLElement {
-    constructor() {
-      super();
-      this.rob_custom = this.dataset.robCustom;
-      // Ensure you are using the GID passed for the API call, not the numeric ID
-      this.boxProductGidForApi = this.dataset.boxProductGid; // This should be the full GID
-      this.variantsData = JSON.parse(this.dataset.variantsJson);
-      this.settings = JSON.parse(this.dataset.settings);
-      this.currencyCode = this.dataset.currencyCode;
+class RfBabFormComponent_{{ rob_custom }} extends HTMLElement {
+  constructor() {
+    super();
+    this.rob_custom = this.dataset.aiGenId;
+    this.boxProductId = this.dataset.boxProductId;
+    this.defaultBagCount = parseInt(this.dataset.defaultBagCount, 10);
+    this.currencyCode = this.dataset.currencyCode;
+    this.settings = JSON.parse(this.dataset.settings);
 
-      this.dynamicBoxData = null;
-      this.selectedQuantityOption = null; 
-      this.selectedPurchaseType = 'subscribe'; 
-      this.selectedFlavors = {}; 
+    this.skioData = null;
+    this.rawSkioResponse = null;
+    this.selectableVariants = [];
+    this.isSubscription = true; // Default to subscription
+    this.selectedTotalBagTarget = this.defaultBagCount;
+    this.flavorMetafields = {};
+    this.flavorQuantities = {}; // Stores { variantPlatformId: quantity }
 
-      this.loadingEl = this.querySelector(`.loading-state-${this.rob_custom}`);
-      this.contentWrapperEl = this.querySelector(`.content-wrapper-${this.rob_custom}`);
-      this.quantityOptionsContainer = this.querySelector(`#quantity-options-${this.rob_custom}`);
-      this.subscribeOptionEl = this.querySelector(`#purchase-option-subscribe-${this.rob_custom}`);
-      this.oneTimeOptionEl = this.querySelector(`#purchase-option-onetime-${this.rob_custom}`);
-      this.flavorListContainer = this.querySelector(`#flavor-list-${this.rob_custom}`);
-      this.addToCartBtn = this.querySelector(`#add-to-cart-btn-${this.rob_custom}`);
-      this.flavorsToGoEl = this.querySelector(`#flavors-to-go-${this.rob_custom}`);
-      this.subtotalValueEl = this.querySelector(`#subtotal-value-${this.rob_custom}`);
-      this.savingsValueEl = this.querySelector(`#savings-value-${this.rob_custom}`);
-      this.summarySectionEl = this.querySelector(`#summary-section-${this.rob_custom}`);
-      this.firstOrderBannerEl = this.querySelector(`#first-order-banner-${this.rob_custom}`);
+    console.log(`[${this.rob_custom}] Component Initialized. Product ID: ${this.boxProductId}, Default Bags: ${this.defaultBagCount}`);
+  }
 
-      this.modal = this.querySelector(`#flavor-modal-${this.rob_custom}`);
-      this.modalCloseBtn = this.querySelector(`#modal-close-btn-${this.rob_custom}`);
-      this.modalImage = this.querySelector(`#modal-image-${this.rob_custom}`);
-      this.modalProductTitle = this.querySelector(`#modal-product-title-${this.rob_custom}`);
-      this.modalFlavorName = this.querySelector(`#modal-flavor-name-${this.rob_custom}`);
-      this.modalBadgesContainer = this.querySelector(`#modal-badges-${this.rob_custom}`);
-      this.modalFlavorDescription = this.querySelector(`#modal-flavor-description-${this.rob_custom}`);
-      this.seeLabelHeader = this.querySelector(`#see-label-header-${this.rob_custom}`);
-      this.seeLabelContent = this.querySelector(`#see-label-content-${this.rob_custom}`);
-      this.accordionArrow = this.seeLabelHeader.querySelector(`.accordion-arrow-${this.rob_custom}`);
+  connectedCallback() {
+    this.cacheDomElements();
+    this.loadFlavorMetafields();
+    this.initializeEventListeners();
+    this.fetchSkioData();
+    this.updateSelectedBagUI(this.selectedTotalBagTarget); // Set initial UI for bag selection
+    this.updatePurchaseTypeUI(); // Set initial UI for purchase type
+    console.log(`[${this.rob_custom}] Component Connected and Event Listeners Initialized.`);
+  }
 
-      if (!this.boxProductGidForApi) { // Check the GID for API
-        this.displayError('Product GID for API not configured.');
-        return;
-      }
-      this.fetchDynamicBoxData();
-    }
+  cacheDomElements() {
+    this.dom = {
+      bagOptionButtons: this.querySelectorAll(`.bag-option-${this.rob_custom}`),
+      purchaseTypeButtons: this.querySelectorAll(`.purchase-type-button-${this.rob_custom}`),
+      subscribeOriginalPrice: this.querySelector(`#subscribeOriginalPrice-${this.rob_custom}`),
+      subscribeTotalPrice: this.querySelector(`#subscribeTotalPrice-${this.rob_custom}`),
+      onetimeOriginalPrice: this.querySelector(`#onetimeOriginalPrice-${this.rob_custom}`), // May not be used if one-time isn't discounted
+      onetimeTotalPrice: this.querySelector(`#onetimeTotalPrice-${this.rob_custom}`),
+      flavorsGrid: this.querySelector(`#flavorsGrid-${this.rob_custom}`),
+      flavorStatusMessage: this.querySelector(`#flavorStatusMessage-${this.rob_custom}`),
+      subtotalSummaryContainer: this.querySelector(`#subtotalSummaryContainer-${this.rob_custom}`),
+      subtotalPrice: this.querySelector(`#subtotalPrice-${this.rob_custom}`),
+      savingsSummaryContainer: this.querySelector(`#savingsSummaryContainer-${this.rob_custom}`),
+      savingsAmount: this.querySelector(`#savingsAmount-${this.rob_custom}`),
+      addToCartButton: this.querySelector(`#addToCartButton-${this.rob_custom}`),
+      loadingFlavorsText: this.querySelector(`.loading-flavors-${this.rob_custom}`)
+    };
+    console.log(`[${this.rob_custom}] DOM Elements Cached.`);
+  }
 
-    connectedCallback() {
-      this.subscribeOptionEl.addEventListener('click', () => this.selectPurchaseType('subscribe'));
-      this.oneTimeOptionEl.addEventListener('click', () => this.selectPurchaseType('onetime'));
-      this.addToCartBtn.addEventListener('click', () => this.handleAddToCart());
-
-      // Modal listeners
-      this.modalCloseBtn.addEventListener('click', () => this.closeModal());
-      this.modal.addEventListener('click', (event) => { // Close on overlay click
-        if (event.target === this.modal) {
-          this.closeModal();
-        }
-      });
-      this.seeLabelHeader.addEventListener('click', () => this.toggleAccordion());
-    }
-
-    displayError(message) {
-      console.error(`DynamicBox Error: ${message}`);
-      if (this.loadingEl) this.loadingEl.innerHTML = `<p>Error: ${message}</p>`;
-      if (this.contentWrapperEl) this.contentWrapperEl.classList.add(`hidden-${this.rob_custom}`);
-    }
-
-    async fetchDynamicBoxData() {
+  loadFlavorMetafields() {
+    const metafieldsScript = document.getElementById(`flavorMetafields-${this.rob_custom}`);
+    if (metafieldsScript && metafieldsScript.textContent) {
       try {
-        const response = await fetch('https://api.skio.com/storefront-http/get-dynamic-box', {
-          method: 'POST',
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ "productPlatformId": this.boxProductGid })
-        });
-        console.log('Skio API Request Body:', { "productPlatformId": this.boxProductGid });
-        if (!response.ok) {
-          const errorData = await response.text();
-          console.error('Skio API Error Response:', errorData);
-          throw new Error(`Skio API request failed: ${response.status} ${response.statusText}`);
-        }
-        const data = await response.json();
-        console.log('Skio API Response:', data);
-
-        if (data.boxId && data.selectableProductVariants) { // Check for key properties of DynamicBox
-          this.dynamicBoxData = data; // Assign data directly
-          this.initialize();
-        } else {
-          throw new Error('Skio API response does not contain expected DynamicBox data.');
-        }
-      } catch (error) {
-        this.displayError(error.message);
+        this.flavorMetafields = JSON.parse(metafieldsScript.textContent);
+        console.log(`[${this.rob_custom}] Flavor metafields loaded:`, Object.keys(this.flavorMetafields).length);
+      } catch (e) {
+        console.error(`[${this.rob_custom}] Error parsing flavor metafields JSON:`, e);
+        console.log(`[${this.rob_custom}] Raw metafields content:`, metafieldsScript.textContent);
       }
+    } else {
+      console.warn(`[${this.rob_custom}] Flavor metafields script tag not found or empty.`);
     }
+  }
 
-    initialize() {
-      if (this.loadingEl) this.loadingEl.classList.add(`hidden-${this.rob_custom}`);
-      if (this.contentWrapperEl) this.contentWrapperEl.classList.remove(`hidden-${this.rob_custom}`);
+  initializeEventListeners() {
+    this.dom.bagOptionButtons.forEach(button => {
+      button.addEventListener('click', (e) => this.handleBagSelection(e));
+    });
+    this.dom.purchaseTypeButtons.forEach(button => {
+      button.addEventListener('click', (e) => this.handlePurchaseTypeSelection(e));
+    });
+    this.dom.addToCartButton.addEventListener('click', () => this.handleAddToCart());
+  }
 
-      this.renderQuantityOptions();
-      // Default to largest quantity option
-      const sizeIntervals = this.dynamicBoxData.sizeInterval || [];
-      if (sizeIntervals.length > 0) {
-        this.selectQuantityOption(Math.max(...sizeIntervals), true);
-      }
-
-      this.renderFlavors();
-      this.selectPurchaseType(this.selectedPurchaseType, true); // Set initial purchase type and update UI
-
-      // Adjust subscribe option radius if banner is not shown
-      if (this.firstOrderBannerEl && this.subscribeOptionEl) {
-          const bannerIsHiddenOrMissing = !this.settings.show_first_order_banner || this.settings.first_order_banner_text.trim() === '';
-          if(bannerIsHiddenOrMissing) {
-            this.subscribeOptionEl.classList.add(`no-banner-radius-${this.rob_custom}`);
-            if(this.firstOrderBannerEl) this.firstOrderBannerEl.classList.add(`hidden-${this.rob_custom}`);
-          } else {
-            this.subscribeOptionEl.classList.remove(`no-banner-radius-${this.rob_custom}`);
-            if(this.firstOrderBannerEl) this.firstOrderBannerEl.classList.remove(`hidden-${this.rob_custom}`);
-          }
-      }
-    }
-
-    renderQuantityOptions() {
-      const sizeIntervals = this.dynamicBoxData.sizeInterval || [];
-      if (sizeIntervals.length === 0) {
-        this.quantityOptionsContainer.innerHTML = `<p>No quantity options available.</p>`;
+  async fetchSkioData() {
+    if (!this.boxProductId || this.boxProductId === 'null') {
+        console.error(`[${this.rob_custom}] Skio Product ID is missing. Cannot fetch Skio data.`);
+        if(this.dom.loadingFlavorsText) this.dom.loadingFlavorsText.textContent = this.settings.skio_error_text;
         return;
-      }
-      this.quantityOptionsContainer.innerHTML = '';
-      const maxQuantity = Math.max(...sizeIntervals);
-
-      sizeIntervals.sort((a,b) => b - a).forEach(quantity => { // Display largest first
-        const btn = document.createElement('button');
-        btn.classList.add(`quantity-option-btn-${this.rob_custom}`);
-        btn.dataset.quantity = quantity;
-        let label = this.settings.qty_option_label_prefix + quantity + this.settings.qty_option_label_suffix;
-        if (quantity === 1) {
-          label = this.settings.qty_option_label_prefix_single + quantity + this.settings.qty_option_label_suffix_single;
-        }
-        btn.textContent = label;
-
-        if (quantity === maxQuantity && this.settings.show_best_deal_badge) {
-          btn.classList.add(`best-deal-${this.rob_custom}`);
-          const badge = document.createElement('span');
-          badge.classList.add(`best-deal-badge-${this.rob_custom}`);
-          badge.textContent = this.settings.best_deal_badge_text;
-          btn.appendChild(badge);
-        }
-
-        btn.addEventListener('click', () => this.selectQuantityOption(quantity));
-        this.quantityOptionsContainer.appendChild(btn);
+    }
+    console.log(`[${this.rob_custom}] Fetching Skio data for product ID: ${this.boxProductId}`);
+    try {
+      const response = await fetch('https://api.skio.com/storefront-http/get-dynamic-box', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productPlatformId: this.boxProductId })
       });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      this.rawSkioResponse = await response.json();
+      console.log(`[${this.rob_custom}] Raw Skio Response:`, this.rawSkioResponse);
+      this.skioData = this.parseSkioResponse(this.rawSkioResponse);
+      console.log(`[${this.rob_custom}] Parsed Skio Data:`, this.skioData);
+
+      if (this.skioData && this.skioData.selectableProductVariants) {
+        this.selectableVariants = this.parseVariantsFromSkio(this.skioData);
+        this.populateFlavorSelector();
+        this.updatePricesAndValidation(); // Initial price update
+      } else {
+        console.error(`[${this.rob_custom}] Skio data or selectableProductVariants missing after parsing.`);
+         if(this.dom.loadingFlavorsText) this.dom.loadingFlavorsText.textContent = this.settings.skio_error_text;
+      }
+    } catch (error) {
+      console.error(`[${this.rob_custom}] Error fetching or parsing SkioBox data:`, error);
+      if(this.dom.loadingFlavorsText) this.dom.loadingFlavorsText.textContent = this.settings.skio_error_text;
+    }
+  }
+  
+  parseSkioResponse(apiResponse) {
+    if (!apiResponse || !apiResponse.DynamicBox) {
+        console.error(`[${this.rob_custom}] Invalid Skio API response structure.`);
+        return null;
+    }
+    const dynamicBox = apiResponse.DynamicBox;
+    return {
+        boxId: dynamicBox.boxId,
+        currencyCode: dynamicBox.currencyCode || 'USD',
+        fixedDiscountTier: dynamicBox.fixedDiscountTier || {},
+        percentDiscountTier: dynamicBox.percentDiscountTier || {},
+        sizeInterval: dynamicBox.sizeInterval || [1, 2, 3, 4], // Defaulting to 1-4 bags
+        selectableProductVariants: dynamicBox.selectableProductVariants || [],
+        sellingPlanGroup: dynamicBox.sellingPlanGroup || {},
+        // Add any other necessary fields from Skio response
+    };
+  }
+
+  parseVariantsFromSkio(parsedSkioData) {
+    if (!parsedSkioData?.selectableProductVariants) return [];
+    // The structure seems to be an array of products, each with variants
+    return parsedSkioData.selectableProductVariants.flatMap(product =>
+        product.productVariants.map(variant => ({
+            platformId: variant.platformId, // This is the Shopify variant GID
+            productVariantTitle: variant.productVariantTitle,
+            imageSrc: variant.imageSrc, // Not used in this block, but good to have
+            price: parseFloat(variant.price), // Ensure it's a number
+            compareAtPrice: variant.compareAtPrice ? parseFloat(variant.compareAtPrice) : null,
+            inventory: variant.inventory,
+            productTitle: product.productTitle,
+            // Adjusted price and selling plan ID will be determined later based on selection
+        }))
+    );
+  }
+
+  handleBagSelection(event) {
+    const selectedButton = event.currentTarget;
+    this.selectedTotalBagTarget = parseInt(selectedButton.dataset.bags, 10);
+    console.log(`[${this.rob_custom}] Bag quantity selected: ${this.selectedTotalBagTarget}`);
+    this.updateSelectedBagUI(this.selectedTotalBagTarget);
+    this.updatePricesAndValidation();
+  }
+
+  updateSelectedBagUI(bags) {
+    this.dom.bagOptionButtons.forEach(btn => {
+      btn.classList.toggle(`selected-${this.rob_custom}`, parseInt(btn.dataset.bags, 10) === bags);
+    });
+  }
+
+  handlePurchaseTypeSelection(event) {
+    const selectedButton = event.currentTarget;
+    this.isSubscription = selectedButton.dataset.purchaseType === 'subscribe';
+    console.log(`[${this.rob_custom}] Purchase type selected: ${this.isSubscription ? 'Subscribe' : 'One-time'}`);
+    this.updatePurchaseTypeUI();
+    this.updatePricesAndValidation();
+  }
+
+  updatePurchaseTypeUI() {
+     this.dom.purchaseTypeButtons.forEach(btn => {
+      btn.classList.remove(`selected-${this.rob_custom}`);
+    });
+    const activeBtn = this.isSubscription ? this.querySelector(`.subscribe-button-${this.rob_custom}`) : this.querySelector(`.onetime-button-${this.rob_custom}`);
+    if (activeBtn) activeBtn.classList.add(`selected-${this.rob_custom}`);
+  }
+
+  populateFlavorSelector() {
+    if (!this.selectableVariants || this.selectableVariants.length === 0) {
+      this.dom.flavorsGrid.innerHTML = `<div class="loading-flavors-${this.rob_custom}">${this.settings.no_flavors_text}</div>`;
+      return;
+    }
+    this.dom.flavorsGrid.innerHTML = ''; // Clear loading/previous
+    this.selectableVariants.forEach(variant => {
+      const variantId = variant.platformId.split('/').pop(); // Get numeric ID for metafield lookup
+      const description = this.flavorMetafields[variantId] || this.settings.default_flavor_description;
+
+      const card = document.createElement('div');
+      card.className = `flavor-card-${this.rob_custom}`;
+      card.innerHTML = `
+        <div class="flavor-info-${this.rob_custom}">
+          <h4 class="flavor-name-${this.rob_custom}">${variant.productVariantTitle}</h4>
+          <p class="flavor-description-${this.rob_custom}">${description}</p>
+        </div>
+        <div class="flavor-controls-${this.rob_custom}" id="controls-${variant.platformId.replace(/[\/:?=]/g, '')}-${this.rob_custom}">
+          <button class="flavor-add-button-${this.rob_custom}" data-variant-id="${variant.platformId}">${this.settings.flavor_add_button_text}</button>
+        </div>
+      `;
+      this.dom.flavorsGrid.appendChild(card);
+
+      // Add event listener for the "Add" button
+      card.querySelector(`.flavor-add-button-${this.rob_custom}`).addEventListener('click', (e) => this.handleAddFlavorClick(e, variant));
+    });
+  }
+
+  handleAddFlavorClick(event, variant) {
+    const variantId = variant.platformId;
+    this.flavorQuantities[variantId] = (this.flavorQuantities[variantId] || 0) + 1;
+    if (this.flavorQuantities[variantId] === 1) { // First time adding this flavor
+        this.renderQuantityStepper(variant);
+    } else { // Already has a stepper, just update its input
+        const input = this.querySelector(`#quantity-${variantId.replace(/[\/:?=]/g, '')}-${this.rob_custom}`);
+        if (input) input.value = this.flavorQuantities[variantId];
+    }
+    this.updatePricesAndValidation();
+  }
+
+  renderQuantityStepper(variant) {
+    const variantId = variant.platformId;
+    const controlsContainer = this.querySelector(`#controls-${variantId.replace(/[\/:?=]/g, '')}-${this.rob_custom}`);
+    if (!controlsContainer) return;
+
+    controlsContainer.innerHTML = `
+      <div class="quantity-stepper-${this.rob_custom}">
+        <button data-action="decrease" data-variant-id="${variantId}">-</button>
+        <input type="number" value="${this.flavorQuantities[variantId]}" min="0" readonly id="quantity-${variantId.replace(/[\/:?=]/g, '')}-${this.rob_custom}">
+        <button data-action="increase" data-variant-id="${variantId}">+</button>
+      </div>
+    `;
+    controlsContainer.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', (e) => this.handleQuantityChange(e, variant));
+    });
+  }
+
+  handleQuantityChange(event, variant) {
+    const action = event.currentTarget.dataset.action;
+    const variantId = variant.platformId;
+    let currentQty = this.flavorQuantities[variantId] || 0;
+
+    if (action === 'increase') {
+      currentQty++;
+    } else if (action === 'decrease') {
+      currentQty = Math.max(0, currentQty - 1);
+    }
+    this.flavorQuantities[variantId] = currentQty;
+
+    if (currentQty === 0) { // Revert to "Add" button
+      delete this.flavorQuantities[variantId];
+      const controlsContainer = this.querySelector(`#controls-${variantId.replace(/[\/:?=]/g, '')}-${this.rob_custom}`);
+      if(controlsContainer) {
+        controlsContainer.innerHTML = `<button class="flavor-add-button-${this.rob_custom}" data-variant-id="${variantId}">${this.settings.flavor_add_button_text}</button>`;
+        controlsContainer.querySelector('button').addEventListener('click', (e) => this.handleAddFlavorClick(e, variant));
+      }
+    } else {
+      const input = this.querySelector(`#quantity-${variantId.replace(/[\/:?=]/g, '')}-${this.rob_custom}`);
+      if (input) input.value = currentQty;
+    }
+    this.updatePricesAndValidation();
+  }
+  
+  formatPrice(amount) {
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency: this.currencyCode }).format(amount);
+    } catch (e) {
+      console.warn(`[${this.rob_custom}] Error formatting price, falling back. Amount: ${amount}, Currency: ${this.currencyCode}`, e);
+      return `$${(amount || 0).toFixed(2)}`;
+    }
+  }
+
+  updatePricesAndValidation() {
+    if (!this.skioData || !this.selectableVariants.length) {
+        console.log(`[${this.rob_custom}] Skio data or variants not ready for price update.`);
+        return;
     }
 
-    selectQuantityOption(quantity, isInitial = false) {
-      this.selectedQuantityOption = parseInt(quantity);
-      console.log('Selected Quantity Option:', this.selectedQuantityOption);
+    let oneTimeBaseTotal = 0;
+    let currentSelectedFlavorCount = 0;
 
-      this.quantityOptionsContainer.querySelectorAll(`.${`quantity-option-btn-${this.rob_custom}`}`).forEach(btn => {
-        if (parseInt(btn.dataset.quantity) === this.selectedQuantityOption) {
-          btn.classList.add(`active-${this.rob_custom}`);
-        } else {
-          btn.classList.remove(`active-${this.rob_custom}`);
+    for (const variantId in this.flavorQuantities) {
+        const quantity = this.flavorQuantities[variantId];
+        if (quantity > 0) {
+            const variantData = this.selectableVariants.find(v => v.platformId === variantId);
+            if (variantData) {
+                oneTimeBaseTotal += variantData.price * quantity;
+                currentSelectedFlavorCount += quantity;
+            }
         }
-      });
-      if (!isInitial) this.clearSelectedFlavors(); // Reset flavors if user changes quantity, or adjust logic as needed
-      this.updatePricingAndTotals();
-      this.updateAddToCartButton();
-      this.updateFlavorsToGo();
     }
     
-    clearSelectedFlavors() {
-        this.selectedFlavors = {};
-        this.renderFlavors(); // Re-render to reset quantities to 0
+    // Apply Skio's bag-based discount (percent or fixed) to one-time price
+    let oneTimeDiscountedTotal = oneTimeBaseTotal;
+    const skioDiscountPercent = parseFloat(this.skioData.percentDiscountTier?.[this.selectedTotalBagTarget] || 0);
+    const skioDiscountFixed = parseFloat(this.skioData.fixedDiscountTier?.[this.selectedTotalBagTarget] || 0);
+
+    if (skioDiscountPercent > 0) {
+        oneTimeDiscountedTotal = oneTimeBaseTotal * (1 - skioDiscountPercent / 100);
+    } else if (skioDiscountFixed > 0 && currentSelectedFlavorCount >= this.selectedTotalBagTarget) { 
+        // Fixed discount might apply per box, ensure enough items are selected to form a box
+        oneTimeDiscountedTotal = Math.max(0, oneTimeBaseTotal - skioDiscountFixed);
+    }
+    
+    this.dom.onetimeTotalPrice.textContent = this.formatPrice(oneTimeDiscountedTotal / 100); // Assuming prices are in cents from Skio
+    if (oneTimeDiscountedTotal < oneTimeBaseTotal && oneTimeBaseTotal > 0) {
+        this.dom.onetimeOriginalPrice.textContent = this.formatPrice(oneTimeBaseTotal / 100);
+        this.dom.onetimeOriginalPrice.style.display = 'inline';
+        this.querySelector(`.onetime-button-${this.rob_custom}`)?.classList.add(`has-discount-${this.rob_custom}`);
+    } else {
+        this.dom.onetimeOriginalPrice.style.display = 'none';
+        this.querySelector(`.onetime-button-${this.rob_custom}`)?.classList.remove(`has-discount-${this.rob_custom}`);
     }
 
-    selectPurchaseType(type, isInitial = false) {
-      this.selectedPurchaseType = type;
-      console.log('Selected Purchase Type:', this.selectedPurchaseType);
-
-      if (type === 'subscribe') {
-        this.subscribeOptionEl.classList.add(`active-${this.rob_custom}`);
-        this.oneTimeOptionEl.classList.remove(`active-${this.rob_custom}`);
-      } else {
-        this.oneTimeOptionEl.classList.add(`active-${this.rob_custom}`);
-        this.subscribeOptionEl.classList.remove(`active-${this.rob_custom}`);
-      }
-      if (!isInitial) this.updatePricingAndTotals();
-    }
-
-    renderFlavors() {
-      this.flavorListContainer.innerHTML = '';
-      const productVariants = this.dynamicBoxData.selectableProductVariants?.[0]?.productVariants || [];
-
-      if (productVariants.length === 0) {
-        this.flavorListContainer.innerHTML = `<p>${this.settings.no_flavors_text}</p>`;
-        return;
-      }
-
-      productVariants.forEach(apiVariant => {
-        const variantData = this.variantsData.find(v => v.gid === apiVariant.platformId || String(v.id) === String(apiVariant.platformId.split('/').pop()));
-        if (!variantData) {
-          console.warn(`Variant data not found for API variant GID: ${apiVariant.platformId}`);
-          return;
+    // Subscription price: Apply selling plan adjustment on top of oneTimeDiscountedTotal
+    let subscriptionTotalPrice = oneTimeDiscountedTotal;
+    if (this.skioData.sellingPlanGroup && Object.keys(this.skioData.sellingPlanGroup).length > 0) {
+        const firstSellingPlanKey = Object.keys(this.skioData.sellingPlanGroup)[0];
+        const sellingPlan = this.skioData.sellingPlanGroup[firstSellingPlanKey];
+        if (sellingPlan && sellingPlan.priceAdjustmentAmount) { // priceAdjustmentAmount is percentage for Skio
+            subscriptionTotalPrice = oneTimeDiscountedTotal * (1 - parseFloat(sellingPlan.priceAdjustmentAmount) / 100);
         }
-
-        const item = document.createElement('div');
-        item.classList.add(`flavor-item-${this.rob_custom}`);
-        const currentQty = this.selectedFlavors[apiVariant.platformId] || 0;
-
-        let flavorDescription = variantData.metafields?.flavor_description || this.settings.default_flavor_description;
-
-        item.innerHTML = `
-          <img src="${apiVariant.imageSrc || variantData.image || this.settings.placeholder_image}" alt="${apiVariant.productVariantTitle}" data-variant-id="${apiVariant.platformId}">
-          <div class="flavor-info-${this.rob_custom}">
-            <div class="flavor-title-${this.rob_custom}" data-variant-id="${apiVariant.platformId}">${apiVariant.productVariantTitle}</div>
-            <div class="flavor-description-${this.rob_custom}">${flavorDescription}</div>
-          </div>
-          <div class="flavor-qty-controls-${this.rob_custom}" id="qty-controls-${this.rob_custom}-${apiVariant.platformId.split('/').pop()}">
-            ${currentQty > 0 ? `
-              <button class="flavor-qty-btn-${this.rob_custom}" data-action="decrease" data-variant-id="${apiVariant.platformId}">-</button>
-              <span class="flavor-qty-${this.rob_custom}">${currentQty}</span>
-              <button class="flavor-qty-btn-${this.rob_custom}" data-action="increase" data-variant-id="${apiVariant.platformId}">+</button>
-            ` : `
-              <button class="flavor-add-btn-${this.rob_custom}" data-action="add" data-variant-id="${apiVariant.platformId}">${this.settings.flavor_add_button_text}</button>
-            `}
-          </div>
-        `;
-        this.flavorListContainer.appendChild(item);
-
-        item.querySelector(`img[data-variant-id="${apiVariant.platformId}"]`).addEventListener('click', () => this.openModal(apiVariant.platformId));
-        item.querySelector(`.flavor-title-${this.rob_custom}[data-variant-id="${apiVariant.platformId}"]`).addEventListener('click', () => this.openModal(apiVariant.platformId));
-
-        const qtyControls = item.querySelector(`#qty-controls-${this.rob_custom}-${apiVariant.platformId.split('/').pop()}`);
-        qtyControls.addEventListener('click', (event) => {
-            const target = event.target.closest('button');
-            if(!target) return;
-
-            const action = target.dataset.action;
-            const variantId = target.dataset.variantId;
-            if (action === 'add') this.updateFlavorQuantity(variantId, 1);
-            if (action === 'increase') this.updateFlavorQuantity(variantId, (this.selectedFlavors[variantId] || 0) + 1);
-            if (action === 'decrease') this.updateFlavorQuantity(variantId, (this.selectedFlavors[variantId] || 0) - 1);
-        });
-      });
     }
+    this.dom.subscribeTotalPrice.textContent = this.formatPrice(subscriptionTotalPrice / 100);
+    this.dom.subscribeOriginalPrice.textContent = this.formatPrice(oneTimeBaseTotal / 100); // Original is always pre-any-discount
 
-    updateFlavorQuantity(variantPlatformId, newQuantity) {
-        newQuantity = Math.max(0, newQuantity); // Ensure quantity is not negative
+    // Update Subtotal and Savings display
+    const finalPrice = (this.isSubscription ? subscriptionTotalPrice : oneTimeDiscountedTotal) / 100;
+    const originalNonDiscountedPrice = oneTimeBaseTotal / 100;
+    const savings = originalNonDiscountedPrice - finalPrice;
 
-        const totalSelectedItems = Object.values(this.selectedFlavors).reduce((sum, qty) => sum + qty, 0);
-        const potentialNewTotal = totalSelectedItems - (this.selectedFlavors[variantPlatformId] || 0) + newQuantity;
+    if (currentSelectedFlavorCount >= this.selectedTotalBagTarget && finalPrice > 0) {
+        this.dom.subtotalPrice.textContent = this.formatPrice(finalPrice);
+        this.dom.subtotalSummaryContainer.style.display = 'flex';
 
-        // Optional: prevent adding more than selectedQuantityOption if needed
-        // if (this.settings.strict_quantity_match && newQuantity > 0 && potentialNewTotal > this.selectedQuantityOption) {
-        //    alert(`You can only select up to ${this.selectedQuantityOption} items.`);
-        //    return;
-        // }
-
-        this.selectedFlavors[variantPlatformId] = newQuantity;
-        if (newQuantity === 0) {
-            delete this.selectedFlavors[variantPlatformId];
-        }
-        console.log('Updated Selected Flavors:', this.selectedFlavors);
-
-        this.renderFlavors(); // Re-render to update the specific item's Qty UI
-        this.updatePricingAndTotals();
-        this.updateAddToCartButton();
-        this.updateFlavorsToGo();
-    }
-
-    updatePricingAndTotals() {
-      if (!this.dynamicBoxData || !this.selectedQuantityOption) return;
-
-      let totalOneTimePrice = 0;
-      Object.entries(this.selectedFlavors).forEach(([variantId, quantity]) => {
-        const apiVariant = this.dynamicBoxData.selectableProductVariants?.[0]?.productVariants.find(v => v.platformId === variantId);
-        if (apiVariant) {
-          totalOneTimePrice += apiVariant.price * quantity;
-        }
-      });
-
-      const formattedTotalOneTimePrice = this.formatMoney(totalOneTimePrice);
-      this.querySelector(`#onetime-price-${this.rob_custom}`).textContent = formattedTotalOneTimePrice;
-
-      const tierDiscountPercent = parseFloat(this.dynamicBoxData.percentDiscountTier?.[this.selectedQuantityOption.toString()] || 0);
-      const subscribeDiscountedPrice = totalOneTimePrice * (1 - tierDiscountPercent / 100);
-      const formattedSubscribeDiscountedPrice = this.formatMoney(subscribeDiscountedPrice);
-
-      this.querySelector(`#subscribe-original-price-${this.rob_custom}`).textContent = formattedTotalOneTimePrice;
-      this.querySelector(`#subscribe-discounted-price-${this.rob_custom}`).textContent = formattedSubscribeDiscountedPrice;
-
-      const currentSubtotal = this.selectedPurchaseType === 'subscribe' ? subscribeDiscountedPrice : totalOneTimePrice;
-      const savings = totalOneTimePrice - subscribeDiscountedPrice;
-
-      const totalItemsSelected = Object.values(this.selectedFlavors).reduce((sum, qty) => sum + qty, 0);
-
-      if (totalItemsSelected >= this.selectedQuantityOption) {
-        this.summarySectionEl.classList.remove(`hidden-${this.rob_custom}`);
-        this.subtotalValueEl.textContent = this.formatMoney(currentSubtotal);
-        if (this.selectedPurchaseType === 'subscribe' && savings > 0) {
-          this.savingsValueEl.textContent = this.formatMoney(savings);
-          this.querySelector(`#savings-label-${this.rob_custom}`).classList.remove(`hidden-${this.rob_custom}`);
+        if (savings > 0) {
+            this.dom.savingsAmount.textContent = this.formatPrice(savings);
+            this.dom.savingsSummaryContainer.style.display = 'flex';
         } else {
-          this.savingsValueEl.textContent = '';
-          this.querySelector(`#savings-label-${this.rob_custom}`).classList.add(`hidden-${this.rob_custom}`);
+            this.dom.savingsSummaryContainer.style.display = 'none';
         }
-      } else {
-        this.summarySectionEl.classList.add(`hidden-${this.rob_custom}`);
-      }
+    } else {
+        this.dom.subtotalSummaryContainer.style.display = 'none';
+        this.dom.savingsSummaryContainer.style.display = 'none';
     }
-
-    updateAddToCartButton() {
-      if (!this.selectedQuantityOption) return;
-      const totalSelected = Object.values(this.selectedFlavors).reduce((sum, qty) => sum + qty, 0);
-      const remaining = this.selectedQuantityOption - totalSelected;
-
-      if (remaining <= 0) {
-        this.addToCartBtn.textContent = this.settings.atc_text_add_to_cart;
-        this.addToCartBtn.classList.remove(`disabled-${this.rob_custom}`);
-        this.addToCartBtn.classList.add(`enabled-${this.rob_custom}`);
-        this.addToCartBtn.disabled = false;
-      } else {
-        let text = this.settings.atc_text_select_more;
-        text = text.replace('{X}', remaining);
-        this.addToCartBtn.textContent = text;
-        this.addToCartBtn.classList.add(`disabled-${this.rob_custom}`);
-        this.addToCartBtn.classList.remove(`enabled-${this.rob_custom}`);
-        this.addToCartBtn.disabled = true;
-      }
-    }
-
-    updateFlavorsToGo() {
-      if (!this.selectedQuantityOption) {
-        this.flavorsToGoEl.textContent = '';
-        return;
-      }
-      const totalSelected = Object.values(this.selectedFlavors).reduce((sum, qty) => sum + qty, 0);
-      const remaining = this.selectedQuantityOption - totalSelected;
-
-      if (remaining <= 0) {
-        let text = this.settings.all_set_text;
-        if(this.settings.allow_more_than_selected_quantity) {
-            text += ` ${this.settings.all_set_can_add_more_text}`;
-        }
-        this.flavorsToGoEl.textContent = text;
-      } else {
-        let text = this.settings.items_to_go_text;
-        text = text.replace('{X}', remaining);
-        this.flavorsToGoEl.textContent = text;
-      }
-    }
-
-    async handleAddToCart() {
-        if (this.addToCartBtn.disabled) return;
-        console.log('Add to cart initiated');
-
-        const items = [];
-        let sellingPlanId = null;
-
-        if (this.selectedPurchaseType === 'subscribe') {
-            // Find the relevant selling plan ID. This might need more robust logic if multiple selling plans exist.
-            // Assuming the first selling plan group and it applies to all variants.
-            const sellingPlanGroups = this.dynamicBoxData.sellingPlanGroup;
-            if (sellingPlanGroups && Object.keys(sellingPlanGroups).length > 0) {
-                const firstGroupKey = Object.keys(sellingPlanGroups)[0];
-                const firstSellingPlanGroup = sellingPlanGroups[firstGroupKey];
-                
-                // Iterate over selected flavors to get their specific selling plan ID if variantMapping exists and is used.
-                // For a simple box, one sellingPlanId might apply to the whole box.
-                // The API response structure implies variantMapping for each selling plan.
-                // For simplicity, let's find a common planId or the first one.
-                // A truly robust solution would check `variantMapping` for each item.
-                // For this example, let's assume the first plan in the first group applies if items are selected.
-                if (Object.values(this.selectedFlavors).some(qty => qty > 0)) {
-                    const firstSelectedVariantId = Object.keys(this.selectedFlavors).find(id => this.selectedFlavors[id] > 0);
-                    if (firstSelectedVariantId && firstSellingPlanGroup.variantMapping && firstSellingPlanGroup.variantMapping[firstSelectedVariantId]) {
-                         sellingPlanId = firstSellingPlanGroup.variantMapping[firstSelectedVariantId].planId;
-                    } else if (firstSellingPlanGroup.allMatch && firstSellingPlanGroup.variantMapping) {
-                        // If allMatch is true, any variant's planId from that group should be fine.
-                        const anyVariantKey = Object.keys(firstSellingPlanGroup.variantMapping)[0];
-                        if(anyVariantKey) sellingPlanId = firstSellingPlanGroup.variantMapping[anyVariantKey].planId;
-                    }
-                    // Fallback if structure is simpler, e.g. planId directly on group (not in example)
-                    if(!sellingPlanId && firstSellingPlanGroup.planId) sellingPlanId = firstSellingPlanGroup.planId;
-
-
-                    console.log('Selected Selling Plan ID:', sellingPlanId);
-                    if (!sellingPlanId) {
-                        console.warn("Could not determine Selling Plan ID for subscription.");
-                        // Decide if to proceed without selling plan or show error. For now, proceed.
-                    }
-                }
-            } else {
-                 console.warn("No selling plan groups found in API data for subscription.");
-            }
-        }
-
-
-        Object.entries(this.selectedFlavors).forEach(([variantPlatformId, quantity]) => {
-            if (quantity > 0) {
-                const shopifyVariantId = variantPlatformId.split('/').pop(); // Get numeric ID
-                const item = {
-                    id: shopifyVariantId,
-                    quantity: quantity
-                };
-                if (this.selectedPurchaseType === 'subscribe' && sellingPlanId) {
-                    item.selling_plan = sellingPlanId.split('/').pop(); // Numeric ID for selling plan
-                }
-                items.push(item);
-            }
-        });
-
-        if (items.length === 0) {
-            alert(this.settings.add_to_cart_no_items_error_text);
-            return;
-        }
-
-        console.log('Items to add to cart:', items);
-        this.addToCartBtn.disabled = true;
-        this.addToCartBtn.textContent = this.settings.atc_text_adding;
-
-        try {
-            const response = await fetch('/cart/add.js', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ items: items })
-            });
-            const cartData = await response.json();
-            console.log('Cart Add Response:', cartData);
-
-            if (response.ok) {
-                 this.addToCartBtn.textContent = this.settings.atc_text_added;
-                if (this.dynamicBoxData.settings?.redirectToCart) {
-                    window.location.href = '/cart';
-                } else {
-                    // Optionally, trigger an event for theme's cart drawer or update mini cart
-                    document.dispatchEvent(new CustomEvent('cart:updated', { bubbles: true, detail: cartData }));
-                    // Reset button after a delay
-                    setTimeout(() => {
-                        this.updateAddToCartButton(); // Reset to "Add to cart" or "Select X more"
-                    }, 2000);
-                }
-            } else {
-                let errorMessage = this.settings.add_to_cart_error_text;
-                if (cartData.message || cartData.description) {
-                    errorMessage += `: ${cartData.message || cartData.description}`;
-                }
-                alert(errorMessage);
-                this.updateAddToCartButton(); // Re-enable button
-            }
-        } catch (error) {
-            console.error('Error adding to cart:', error);
-            alert(this.settings.add_to_cart_error_text);
-            this.updateAddToCartButton(); // Re-enable button
-        }
-    }
-
-
-    openModal(variantPlatformId) {
-        const apiVariant = this.dynamicBoxData.selectableProductVariants?.[0]?.productVariants.find(v => v.platformId === variantPlatformId);
-        const localVariantData = this.variantsData.find(v => v.gid === variantPlatformId || String(v.id) === String(variantPlatformId.split('/').pop()));
-
-        if (!apiVariant || !localVariantData) {
-            console.error('Variant data not found for modal:', variantPlatformId);
-            return;
-        }
-
-        this.modalImage.src = apiVariant.imageSrc || localVariantData.featured_image_url || this.settings.placeholder_image;
-        this.modalImage.alt = apiVariant.productVariantTitle;
-        this.modalFlavorName.textContent = apiVariant.productVariantTitle;
-        this.modalFlavorDescription.textContent = localVariantData.metafields?.flavor_description || this.settings.default_flavor_description;
-
-        // Badges
-        this.modalBadgesContainer.innerHTML = '';
-        const badge1Text = localVariantData.metafields?.variant_flag;
-        if (badge1Text) {
-            const badge1 = document.createElement('span');
-            badge1.classList.add(`modal-badge-${this.rob_custom}`);
-            badge1.style.backgroundColor = localVariantData.metafields?.primary_color || this.settings.badge_1_bg_color;
-            badge1.textContent = badge1Text;
-            this.modalBadgesContainer.appendChild(badge1);
-        }
-        const badge2Text = localVariantData.metafields?.servings;
-        if (badge2Text) {
-            const badge2 = document.createElement('span');
-            badge2.classList.add(`modal-badge-${this.rob_custom}`);
-            badge2.style.backgroundColor = localVariantData.metafields?.secondary_color || this.settings.badge_2_bg_color;
-            badge2.textContent = badge2Text;
-            this.modalBadgesContainer.appendChild(badge2);
-        }
-        if(this.settings.show_modal_badge_3 && this.settings.modal_badge_3_text !== '') {
-            const badge3 = document.createElement('span');
-            badge3.classList.add(`modal-badge-${this.rob_custom}`);
-            badge3.style.backgroundColor = this.settings.badge_3_bg_color;
-            badge3.textContent = this.settings.modal_badge_3_text;
-            this.modalBadgesContainer.appendChild(badge3);
-        }
-
-
-        this.seeLabelContent.innerHTML = localVariantData.metafields?.nutritional_information || `<p>${this.settings.no_nutritional_info_text}</p>`;
-
-        this.modal.style.display = 'block';
-        document.body.style.overflow = 'hidden'; // Prevent background scroll
-    }
-
-    closeModal() {
-        this.modal.style.display = 'none';
-        document.body.style.overflow = ''; // Restore scroll
-        // Reset accordion state if needed
-        if (this.seeLabelContent.classList.contains(`open-${this.rob_custom}`)) {
-            this.toggleAccordion();
-        }
-    }
-
-    toggleAccordion() {
-        this.seeLabelHeader.classList.toggle(`open-${this.rob_custom}`);
-        this.seeLabelContent.classList.toggle(`open-${this.rob_custom}`);
-        this.accordionArrow.classList.toggle(`open-${this.rob_custom}`);
-    }
-
-    formatMoney(value) {
-        const numValue = Number(value);
-        if (isNaN(numValue)) return '';
-        // Basic formatter, Shopify's Liquid money filter is better but not available here directly for dynamic values
-        return `${this.dynamicBoxData?.currencyCode || this.currencyCode || '$'}${numValue.toFixed(2)}`;
-    }
-
+    
+    // Validate quantities and update ATC button
+    this.validateFlavorQuantities(currentSelectedFlavorCount);
+    console.log(`[${this.rob_custom}] Prices and validation updated. Current Bags: ${currentSelectedFlavorCount}, Target: ${this.selectedTotalBagTarget}`);
   }
-  customElements.define('dynamic-box-{{ rob_custom }}', DynamicBox{{ rob_custom | camelize }});
+
+
+  validateFlavorQuantities(currentSelectedFlavorCount) {
+    const remainingBags = this.selectedTotalBagTarget - currentSelectedFlavorCount;
+
+    if (remainingBags > 0) {
+      this.dom.addToCartButton.disabled = true;
+      this.dom.addToCartButton.textContent = this.settings.atc_select_more_text.replace('{count}', remainingBags).replace('{s}', remainingBags !== 1 ? this.settings.bag_label_plural_suffix : '');
+      this.dom.flavorStatusMessage.textContent = this.settings.status_more_to_go_text.replace('{count}', remainingBags).replace('{s}', remainingBags !== 1 ? this.settings.bag_label_plural_suffix : '');
+      this.dom.flavorStatusMessage.className = `flavor-status-message-${this.rob_custom} error-${this.rob_custom}`;
+    } else { // Target met or exceeded
+      this.dom.addToCartButton.disabled = false;
+      this.dom.addToCartButton.textContent = this.settings.atc_ready_text;
+      if (currentSelectedFlavorCount > this.selectedTotalBagTarget && this.settings.status_can_add_more_text) {
+        this.dom.flavorStatusMessage.textContent = this.settings.status_can_add_more_text;
+      } else {
+        this.dom.flavorStatusMessage.textContent = this.settings.status_all_set_text;
+      }
+      this.dom.flavorStatusMessage.className = `flavor-status-message-${this.rob_custom} info-${this.rob_custom}`;
+    }
+     this.dom.flavorStatusMessage.style.display = this.dom.flavorStatusMessage.textContent ? 'inline-block' : 'none';
+  }
+
+  async handleAddToCart() {
+    console.log(`[${this.rob_custom}] Add to cart initiated.`);
+    this.dom.addToCartButton.disabled = true;
+    this.dom.addToCartButton.textContent = this.settings.atc_adding_text;
+
+    const items = [];
+    let sellingPlanId = null;
+
+    if (this.isSubscription && this.skioData.sellingPlanGroup && Object.keys(this.skioData.sellingPlanGroup).length > 0) {
+        const firstSellingPlanKey = Object.keys(this.skioData.sellingPlanGroup)[0]; // e.g. "gid://shopify/SellingPlanGroup/12345"
+        const skioSellingPlan = this.skioData.sellingPlanGroup[firstSellingPlanKey];
+        // Find a mapped selling plan ID if available for the variants, otherwise use a default from the group
+        // Skio's `variantMapping` under `sellingPlanGroup[id]` would provide specific plan IDs per variant if needed.
+        // For a simple dynamic box, often one main selling plan from the group is used.
+        // The `planId` from `variantMapping` if it existed, or a primary selling plan from the group.
+        // For now, let's assume the first plan in the first group is what we want.
+        // sellingPlanId = skioSellingPlan.sellingPlans[0].platformId.split('/').pop(); // Example path, might vary
+        // The simple approach from the original snippet was to take the GID of the *group* and extract the ID.
+        // However, cart/add.js needs selling_plan ID not group ID.
+        // Skio's example for dynamic box usually means the items are added with properties, and Skio handles subscription linking.
+        // Let's check if `skioData.sellingPlanGroup[key].variantMapping[variantId].planId` provides the actual selling plan ID.
+        // The example used `_dynamicBoxIndex` and `_dynamicBoxId` properties.
+
+        // If Skio requires a specific selling plan to be passed per item:
+        // Find the first selling plan ID from the selling plan group data.
+        // This logic might need refinement based on actual Skio requirements for dynamic boxes.
+        const groupKey = Object.keys(this.skioData.sellingPlanGroup)[0];
+        const group = this.skioData.sellingPlanGroup[groupKey];
+        if (group.sellingPlans && group.sellingPlans.length > 0) {
+             sellingPlanId = group.sellingPlans[0].platformId.split('/').pop(); // Get numeric ID
+        } else {
+            console.warn(`[${this.rob_custom}] No selling plans found in the Skio data for subscription.`);
+        }
+
+    }
+
+
+    for (const variantId in this.flavorQuantities) {
+      const quantity = this.flavorQuantities[variantId];
+      if (quantity > 0) {
+        const item = {
+          id: variantId.split('/').pop(), // Numeric Shopify Variant ID
+          quantity: quantity,
+          properties: {
+            '_dynamicBoxId': this.skioData.boxId,
+            '_dynamicBoxGroup': this.selectedTotalBagTarget // Or some other identifier for the chosen bag configuration
+            // Add other properties as required by Skio
+          }
+        };
+        if (this.isSubscription && sellingPlanId) {
+          item.selling_plan = sellingPlanId;
+        }
+        items.push(item);
+      }
+    }
+
+    if (items.length === 0) {
+      console.warn(`[${this.rob_custom}] No items to add to cart.`);
+      this.dom.addToCartButton.textContent = this.settings.atc_ready_text; // Revert
+      this.validateFlavorQuantities(0); // Re-validate
+      return;
+    }
+
+    console.log(`[${this.rob_custom}] Adding to cart:`, { items: items });
+
+    try {
+      const response = await fetch(`${window.Shopify.routes.root}cart/add.js`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: items }),
+      });
+      const cartData = await response.json();
+      console.log(`[${this.rob_custom}] Cart add response:`, cartData);
+      if (response.ok) {
+        document.dispatchEvent(new CustomEvent('cart:updated', { bubbles: true, detail: cartData }));
+        // Optionally redirect to cart or show success
+        if (this.settings.redirect_to_cart) {
+            window.location.href = window.Shopify.routes.root + 'cart';
+        } else {
+             // Refresh cart drawer if present (theme-dependent)
+            const cartDrawer = document.querySelector('cart-drawer') || document.querySelector('.cart-drawer'); // Common selectors
+            if (cartDrawer && typeof cartDrawer.open === 'function') {
+                // cartDrawer.open(); // Or a method to refresh and open
+            } else if (cartDrawer && typeof cartDrawer.refresh === 'function') {
+                cartDrawer.refresh(true);
+            }
+             this.dom.addToCartButton.textContent = this.settings.atc_success_text || 'Added!';
+             setTimeout(() => {
+                this.dom.addToCartButton.disabled = false;
+                this.validateFlavorQuantities(Object.values(this.flavorQuantities).reduce((a, b) => a + b, 0));
+             }, 2000);
+        }
+      } else {
+        throw new Error(cartData.description || cartData.message || 'Error adding to cart');
+      }
+    } catch (error) {
+      console.error(`[${this.rob_custom}] Error adding to cart:`, error);
+      this.dom.addToCartButton.disabled = false;
+      this.dom.addToCartButton.textContent = this.settings.atc_error_text || 'Error - Try Again';
+      // Show error message to user
+    }
+  }
+}
+customElements.define(`rf-bab-form-component-${rob_custom}`, RfBabFormComponent_{{ rob_custom }});
 </script>
 
 {% schema %}
 {
-  "name": "Skio Dynamic Box",
-  "tag": "section",
-  "class": "shopify-section-skio-dynamic-box",
+  "name": "Build-a-Box Form",
+  "tag": "div",
+  "class": "rf-bab-form-block-wrapper",
   "settings": [
     {
       "type": "header",
-      "content": "Product Configuration"
+      "content": "Data Configuration"
     },
     {
       "type": "product",
-      "id": "box_product",
-      "label": "Box Product",
-      "info": "Select the Shopify product whose GID will be used for the Skio API 'productPlatformId'. Its variants should correspond to the selectable flavors and have the required metafields."
+      "id": "main_product_for_skio",
+      "label": "Skio Dynamic Box Product",
+      "info": "Select the Shopify product configured as a Dynamic Box in Skio."
     },
     {
-      "type": "image_picker",
-      "id": "placeholder_image",
-      "label": "Fallback Placeholder Image"
+      "type": "collection",
+      "id": "collection_for_flavor_metafields",
+      "label": "Flavor Description Collection",
+      "info": "Optional: Collection whose product variants provide flavor descriptions via 'custom.flavor_description' metafield. If blank, attempts to use variants from the Skio product."
     },
     {
-        "type": "text",
-        "id": "loading_text",
-        "label": "Loading Text",
-        "default": "Loading your custom box..."
-    },
-    {
-      "type": "header",
-      "content": "General Text Settings"
-    },
-    {
-      "type": "text",
-      "id": "qty_option_label_prefix",
-      "label": "Quantity Option Label Prefix",
-      "default": "#"
-    },
-    {
-      "type": "text",
-      "id": "qty_option_label_suffix",
-      "label": "Quantity Option Label Suffix",
-      "default": " Bags"
-    },
-    {
-      "type": "text",
-      "id": "qty_option_label_prefix_single",
-      "label": "Quantity Option Label Prefix (Single)",
-      "default": "#"
-    },
-    {
-      "type": "text",
-      "id": "qty_option_label_suffix_single",
-      "label": "Quantity Option Label Suffix (Single)",
-      "default": " Bag"
-    },
-    {
-      "type": "text",
-      "id": "subscribe_save_title",
-      "label": "'Subscribe & Save' Title",
-      "default": "Subscribe & Save"
-    },
-    {
-      "type": "text",
-      "id": "one_time_purchase_title",
-      "label": "'One-time Purchase' Title",
-      "default": "One-time Purchase"
-    },
-    {
-      "type": "text",
-      "id": "flavor_section_title",
-      "label": "Flavor Section Title",
-      "default": "SELECT FLAVORS"
-    },
-    {
-      "type": "text",
-      "id": "subtotal_label",
-      "label": "Subtotal Label",
-      "default": "Subtotal:"
-    },
-    {
-      "type": "text",
-      "id": "savings_label",
-      "label": "Savings Label",
-      "default": "You're saving"
-    },
-    {
-      "type": "text",
-      "id": "default_flavor_description",
-      "label": "Default Flavor Description",
-      "default": "Delicious flavor.",
-      "info": "Used if 'custom.flavor_description' metafield is missing."
-    },
-    {
-      "type": "text",
-      "id": "no_flavors_text",
-      "label": "No Flavors Available Text",
-      "default": "No flavors currently available for this selection."
-    },
-    {
-      "type": "text",
-      "id": "flavor_add_button_text",
-      "label": "Flavor 'Add' Button Text",
-      "default": "Add +"
-    },
-    {
-      "type": "header",
-      "content": "Subscription Details & Banners"
-    },
-    {
-      "type": "checkbox",
-      "id": "show_first_order_banner",
-      "label": "Show 'First Order' Banner",
-      "default": true
-    },
-    {
-      "type": "text",
-      "id": "first_order_banner_text",
-      "label": "'First Order' Banner Text",
-      "default": "SAVE 38% ON FIRST ORDER",
-      "info": "Shown above subscribe option if enabled."
-    },
-    {
-      "type": "text",
-      "id": "subscribe_detail_1",
-      "label": "Subscription Detail 1",
-      "default": "FREE SHIPPING on first order"
-    },
-    {
-      "type": "text",
-      "id": "subscribe_detail_2",
-      "label": "Subscription Detail 2",
-      "default": "NO CONTRACT cancel easily"
-    },
-    {
-      "type": "text",
-      "id": "subscribe_detail_3",
-      "label": "Subscription Detail 3",
-      "default": "OUT OF STOCK PROTECTION"
-    },
-    {
-      "type": "text",
-      "id": "future_orders_text",
-      "label": "'Future Orders' Text",
-      "default": "15% OFF future orders"
-    },
-    {
-      "type": "header",
-      "content": "Status Banner Texts"
-    },
-    {
-      "type": "text",
-      "id": "items_to_go_text",
-      "label": "'Items to Go' Banner Text",
-      "default": "{X} Flavor to Go",
-      "info": "{X} will be replaced with the number of items."
-    },
-    {
-      "type": "text",
-      "id": "all_set_text",
-      "label": "'All Set' Banner Text",
-      "default": "All Set!"
+      "type": "number",
+      "id": "default_bag_count",
+      "label": "Default Selected Bag Count",
+      "default": 3,
+      "info": "Number of bags initially selected (1-4)."
     },
     {
         "type": "checkbox",
-        "id": "allow_more_than_selected_quantity",
-        "label": "Allow adding more than selected quantity",
-        "default": true,
-        "info": "If checked, '(You can add more)' text is appended to 'All Set!' banner."
-    },
-    {
-      "type": "text",
-      "id": "all_set_can_add_more_text",
-      "label": "'(You can add more)' Text",
-      "default": "(You can add more)"
-    },
-    {
-      "type": "header",
-      "content": "Add To Cart Button Texts"
-    },
-    {
-      "type": "text",
-      "id": "atc_text_select_more",
-      "label": "ATC Button 'Select More' Text",
-      "default": "SELECT {X} MORE BAGS"
-    },
-    {
-      "type": "text",
-      "id": "atc_text_add_to_cart",
-      "label": "ATC Button 'Add to Cart' Text",
-      "default": "ADD TO CART"
-    },
-    {
-      "type": "text",
-      "id": "atc_text_adding",
-      "label": "ATC Button 'Adding...' Text",
-      "default": "Adding..."
-    },
-    {
-      "type": "text",
-      "id": "atc_text_added",
-      "label": "ATC Button 'Added' Text",
-      "default": "Added!"
-    },
-    {
-      "type": "text",
-      "id": "add_to_cart_no_items_error_text",
-      "label": "Error: No items selected",
-      "default": "Please select some items to add to your cart."
-    },
-    {
-      "type": "text",
-      "id": "add_to_cart_error_text",
-      "label": "Error: Add to cart failed",
-      "default": "There was an error adding items to your cart. Please try again."
-    },
-    {
-      "type": "header",
-      "content": "Modal Settings"
-    },
-    {
-      "type": "text",
-      "id": "modal_static_product_title",
-      "label": "Modal: Static Product Title",
-      "default": "Protein Coffee"
-    },
-    {
-      "type": "text",
-      "id": "modal_accordion_title",
-      "label": "Modal: 'See Label' Accordion Title",
-      "default": "SEE LABEL"
-    },
-    {
-        "type": "richtext",
-        "id": "no_nutritional_info_text",
-        "label": "Modal: No Nutritional Info Text",
-        "default": "<p>Nutritional information not available for this flavor.</p>"
-    },
-    {
-      "type": "checkbox",
-      "id": "show_modal_badge_3",
-      "label": "Show Third Badge in Modal",
-      "default": true
-    },
-    {
-      "type": "text",
-      "id": "modal_badge_3_text",
-      "label": "Modal: Third Badge Text",
-      "default": "105mg Caffeine"
+        "id": "redirect_to_cart",
+        "label": "Redirect to cart on add",
+        "default": false
     },
     {
       "type": "header",
       "content": "General Styling"
-    },
-    {
-      "type": "font_picker",
-      "id": "font_family",
-      "label": "Font Family",
-      "default": "sans-serif"
     },
     {
       "type": "color",
@@ -1452,174 +1132,493 @@
       "default": "#FFFFFF"
     },
     {
-      "type": "color",
-      "id": "text_color",
-      "label": "Default Text Color",
-      "default": "#333333"
+      "type": "range",
+      "id": "block_padding",
+      "label": "Block Padding",
+      "min": 0, "max": 50, "step": 1, "unit": "px",
+      "default": 20
     },
     {
       "type": "range",
+      "id": "block_border_radius",
+      "label": "Block Border Radius",
+      "min": 0, "max": 30, "step": 1, "unit": "px",
+      "default": 8
+    },
+    {
+      "type": "range",
+      "id": "block_border_width",
+      "label": "Block Border Width",
+      "min": 0, "max": 5, "step": 1, "unit": "px",
+      "default": 0
+    },
+    {
+      "type": "color",
+      "id": "block_border_color",
+      "label": "Block Border Color",
+      "default": "#E0E0E0"
+    },
+     {
+      "type": "range",
       "id": "max_width",
       "label": "Max Width of Block",
-      "min": 400,
-      "max": 1200,
-      "step": 10,
-      "unit": "px",
-      "default": 700
+      "min": 300, "max": 800, "step": 10, "unit": "px",
+      "default": 600
+    },
+    {
+      "type": "font_picker",
+      "id": "font",
+      "label": "Base Font",
+      "default": "sans-serif"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "Primary Text Color",
+      "default": "#333333"
+    },
+    {
+      "type": "color",
+      "id": "light_text_color",
+      "label": "Secondary/Light Text Color",
+      "default": "#777777"
+    },
+    {
+      "type": "color",
+      "id": "border_color",
+      "label": "Default Border Color",
+      "default": "#E0E0E0"
     },
     {
       "type": "range",
       "id": "section_spacing",
       "label": "Spacing Between Sections",
-      "min": 0,
-      "max": 50,
-      "step": 2,
-      "unit": "px",
+      "min": 10, "max": 40, "step": 1, "unit": "px",
       "default": 20
     },
     {
       "type": "header",
-      "content": "Block Padding"
+      "content": "Bag Selection Buttons"
     },
-    { "type": "range", "id": "padding_block_start", "label": "Padding Top", "min": 0, "max": 100, "step": 1, "unit": "px", "default": 20 },
-    { "type": "range", "id": "padding_block_end", "label": "Padding Bottom", "min": 0, "max": 100, "step": 1, "unit": "px", "default": 20 },
-    { "type": "range", "id": "padding_inline_start", "label": "Padding Left", "min": 0, "max": 100, "step": 1, "unit": "px", "default": 20 },
-    { "type": "range", "id": "padding_inline_end", "label": "Padding Right", "min": 0, "max": 100, "step": 1, "unit": "px", "default": 20 },
-
+    {
+      "type": "text",
+      "id": "bag_label_singular",
+      "label": "Label for Single Bag (e.g., Bag)",
+      "default": "Bag"
+    },
+    {
+      "type": "text",
+      "id": "bag_label_plural_suffix",
+      "label": "Plural Suffix (e.g., s)",
+      "default": "s"
+    },
+    {
+      "type": "range",
+      "id": "bag_option_gap",
+      "label": "Gap Between Bag Buttons",
+      "min": 4, "max": 20, "step": 1, "unit": "px",
+      "default": 8
+    },
+    {
+      "type": "color",
+      "id": "bag_option_bg_color",
+      "label": "Bag Button BG Color",
+      "default": "#FFFFFF"
+    },
+    {
+      "type": "color",
+      "id": "bag_option_selected_bg_color",
+      "label": "Selected Bag Button BG Color",
+      "default": "#F0F0F0"
+    },
+    {
+      "type": "color",
+      "id": "bag_option_selected_text_color",
+      "label": "Selected Bag Button Text Color",
+      "default": "#333333"
+    },
+    {
+      "type": "range",
+      "id": "bag_option_border_width",
+      "label": "Bag Button Border Width", "min": 1, "max": 3, "step": 1, "unit": "px", "default": 1
+    },
+    {
+      "type": "range",
+      "id": "bag_option_selected_border_width",
+      "label": "Selected Bag Button Border Width", "min": 1, "max": 3, "step": 1, "unit": "px", "default": 2
+    },
+    {
+      "type": "range",
+      "id": "bag_option_border_radius",
+      "label": "Bag Button Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 6
+    },
+    {
+      "type": "range",
+      "id": "bag_option_padding_y",
+      "label": "Bag Button Padding (Y)", "min": 5, "max": 20, "step": 1, "unit": "px", "default": 10
+    },
+    {
+      "type": "range",
+      "id": "bag_option_padding_x",
+      "label": "Bag Button Padding (X)", "min": 5, "max": 20, "step": 1, "unit": "px", "default": 10
+    },
+    {
+      "type": "range",
+      "id": "bag_option_font_size",
+      "label": "Bag Button Font Size", "min": 12, "max": 18, "step": 1, "unit": "px", "default": 14
+    },
+    {
+      "type": "select",
+      "id": "bag_option_font_weight",
+      "label": "Bag Button Font Weight",
+      "options": [{"value": "400", "label": "Normal"}, {"value": "600", "label": "Semi-Bold"}, {"value": "700", "label": "Bold"}],
+      "default": "600"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_best_deal_badge",
+      "label": "Show 'Best Deal' Badge (on 4 bags)",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "best_deal_badge_text",
+      "label": "Best Deal Badge Text",
+      "default": "Best Deal"
+    },
+    {
+      "type": "color",
+      "id": "best_deal_badge_bg_color",
+      "label": "Best Deal Badge BG",
+      "default": "#D32F2F"
+    },
+    {
+      "type": "color",
+      "id": "best_deal_badge_text_color",
+      "label": "Best Deal Badge Text Color",
+      "default": "#FFFFFF"
+    },
+    {
+      "type": "range",
+      "id": "best_deal_badge_border_radius", "label": "Best Deal Badge Radius", "min": 0, "max": 10, "step": 1, "unit": "px", "default": 3
+    },
+    {
+      "type": "range",
+      "id": "best_deal_badge_font_size", "label": "Best Deal Badge Font Size", "min": 8, "max": 14, "step": 1, "unit": "px", "default": 10
+    },
     {
       "type": "header",
-      "content": "Quantity Options Styling"
+      "content": "Purchase Options (Subscribe/One-Time)"
     },
-    { "type": "checkbox", "id": "show_best_deal_badge", "label": "Show 'Best Deal' Badge", "default": true },
-    { "type": "text", "id": "best_deal_badge_text", "label": "Best Deal Badge Text", "default": "BEST DEAL" },
-    { "type": "color", "id": "best_deal_badge_bg_color", "label": "Best Deal Badge BG", "default": "#E53935" },
-    { "type": "color", "id": "best_deal_badge_text_color", "label": "Best Deal Badge Text", "default": "#FFFFFF" },
-    { "type": "range", "id": "best_deal_badge_font_size", "label": "Best Deal Badge Font Size", "min": 8, "max": 16, "step": 1, "unit": "px", "default": 10 },
-    { "type": "range", "id": "best_deal_badge_border_radius", "label": "Best Deal Badge Border Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 4 },
-    { "type": "range", "id": "qty_option_gap", "label": "Gap Between Options", "min": 5, "max": 30, "step": 1, "unit": "px", "default": 10 },
-    { "type": "range", "id": "qty_option_padding_y", "label": "Padding Y", "min": 5, "max": 30, "step": 1, "unit": "px", "default": 15 },
-    { "type": "range", "id": "qty_option_padding_x", "label": "Padding X", "min": 5, "max": 30, "step": 1, "unit": "px", "default": 10 },
-    { "type": "range", "id": "qty_option_font_size", "label": "Font Size", "min": 12, "max": 24, "step": 1, "unit": "px", "default": 16 },
-    { "type": "color", "id": "qty_option_bg_color", "label": "Background", "default": "#FFFFFF" },
-    { "type": "color", "id": "qty_option_text_color", "label": "Text Color", "default": "#333333" },
-    { "type": "color", "id": "qty_option_border_color", "label": "Border Color", "default": "#DDDDDD" },
-    { "type": "range", "id": "qty_option_border_radius", "label": "Border Radius", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 8 },
-    { "type": "color", "id": "qty_option_bg_active_color", "label": "Active Background", "default": "#4A00E0" },
-    { "type": "color", "id": "qty_option_text_active_color", "label": "Active Text Color", "default": "#FFFFFF" },
-    { "type": "color", "id": "qty_option_border_active_color", "label": "Active Border Color", "default": "#4A00E0" },
-
+    {
+      "type": "text",
+      "id": "subscribe_title",
+      "label": "Subscribe Option Title",
+      "default": "Subscribe & Save"
+    },
+    {
+      "type": "text",
+      "id": "onetime_title",
+      "label": "One-Time Purchase Title",
+      "default": "One-time Purchase"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_subscribe_banner",
+      "label": "Show Subscribe Banner",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "subscribe_banner_text",
+      "label": "Subscribe Banner Text",
+      "default": "SAVE 38% ON FIRST ORDER"
+    },
+    {
+      "type": "color",
+      "id": "subscribe_banner_bg_color",
+      "label": "Subscribe Banner BG Color",
+      "default": "#4A00E0"
+    },
+    {
+      "type": "color",
+      "id": "subscribe_banner_text_color",
+      "label": "Subscribe Banner Text Color",
+      "default": "#FFFFFF"
+    },
+    {
+      "type": "range",
+      "id": "subscribe_banner_font_size", "label": "Subscribe Banner Font Size", "min":10, "max":16, "step":1, "unit":"px", "default":12
+    },
+    {
+      "type": "range",
+      "id": "purchase_option_gap", "label": "Gap Between Purchase Options", "min": 8, "max": 20, "step": 1, "unit": "px", "default": 10
+    },
+    {
+      "type": "color",
+      "id": "purchase_option_bg_color", "label": "Purchase Option BG", "default": "#F8F8F8"
+    },
+    {
+      "type": "color",
+      "id": "purchase_option_selected_bg_color", "label": "Selected Purchase Option BG", "default": "#E8E0FF"
+    },
+    {
+      "type": "range",
+      "id": "purchase_option_border_radius", "label": "Purchase Option Radius", "min": 0, "max": 20, "step": 1, "unit": "px", "default": 8
+    },
+    {
+      "type": "range",
+      "id": "purchase_option_padding_y", "label": "Purchase Option Padding (Y)", "min": 10, "max": 25, "step": 1, "unit": "px", "default": 15
+    },
+    {
+      "type": "range",
+      "id": "purchase_option_padding_x", "label": "Purchase Option Padding (X)", "min": 10, "max": 25, "step": 1, "unit": "px", "default": 15
+    },
+    {
+      "type": "range",
+      "id": "purchase_label_font_size", "label": "Label Font Size", "min":14, "max":20, "step":1, "unit":"px", "default":16
+    },
+    {
+      "type": "select",
+      "id": "purchase_label_font_weight", "label": "Label Font Weight", "options": [{"value": "400", "label": "Normal"}, {"value": "600", "label": "Semi-Bold"}, {"value": "700", "label": "Bold"}], "default": "700"
+    },
+    {
+      "type": "color",
+      "id": "purchase_label_selected_text_color", "label": "Selected Label Text Color", "default": "#4A00E0"
+    },
+    {
+      "type": "range",
+      "id": "original_price_font_size", "label": "Original Price Font Size", "min":10, "max":16, "step":1, "unit":"px", "default":12
+    },
+    {
+      "type": "range",
+      "id": "current_price_font_size", "label": "Current Price Font Size", "min":14, "max":20, "step":1, "unit":"px", "default":16
+    },
+    {
+      "type": "select",
+      "id": "current_price_font_weight", "label": "Current Price Font Weight", "options": [{"value": "400", "label": "Normal"}, {"value": "600", "label": "Semi-Bold"}, {"value": "700", "label": "Bold"}], "default": "700"
+    },
+     {
+      "type": "color",
+      "id": "current_price_selected_text_color", "label": "Selected Current Price Text Color", "default": "#4A00E0"
+    },
     {
       "type": "header",
-      "content": "Purchase Options Styling"
+      "content": "Subscription Benefits List"
     },
-    { "type": "color", "id": "first_order_banner_bg", "label": "First Order Banner BG", "default": "#4A00E0" },
-    { "type": "color", "id": "first_order_banner_text_color", "label": "First Order Banner Text", "default": "#FFFFFF" },
-    { "type": "range", "id": "first_order_banner_font_size", "label": "First Order Banner Font Size", "min":10, "max":20, "step":1, "default":12 },
-    { "type": "range", "id": "purchase_option_padding_y", "label": "Padding Y", "min": 5, "max": 40, "step": 1, "unit": "px", "default": 20 },
-    { "type": "range", "id": "purchase_option_padding_x", "label": "Padding X", "min": 5, "max": 40, "step": 1, "unit": "px", "default": 20 },
-    { "type": "color", "id": "purchase_option_border_color", "label": "Border Color", "default": "#DDDDDD" },
-    { "type": "range", "id": "purchase_option_border_radius", "label": "Border Radius", "min": 0, "max": 30, "step": 1, "unit": "px", "default": 8 },
-    { "type": "color", "id": "purchase_option_bg_active_color", "label": "Active Background", "default": "#F0E6FF" },
-    { "type": "color", "id": "purchase_option_border_active_color", "label": "Active Border/Focus Color", "default": "#4A00E0" },
-    { "type": "range", "id": "purchase_option_title_font_size", "label": "Title Font Size", "min":14, "max":24, "step":1, "default":18},
-    { "type": "color", "id": "purchase_option_title_color", "label": "Title Color", "default": "#333333" },
-    { "type": "color", "id": "purchase_option_price_color", "label": "Price Color", "default": "#000000" },
-    { "type": "color", "id": "original_price_color", "label": "Original Price Color", "default": "#777777" },
-    { "type": "range", "id": "purchase_option_details_font_size", "label": "Details Font Size", "min":10, "max":16, "step":1, "default":13},
-    { "type": "color", "id": "purchase_option_details_color", "label": "Details Text Color", "default": "#555555" },
-    { "type": "color", "id": "checkmark_color", "label": "Checkmark Color", "default": "#4CAF50" },
-
+    {
+      "type": "text", "id": "benefit_1", "label": "Benefit 1 Text", "default": "Free shipping"
+    },
+    {
+      "type": "text", "id": "benefit_2", "label": "Benefit 2 Text", "default": "15% OFF future orders"
+    },
+    {
+      "type": "text", "id": "benefit_3", "label": "Benefit 3 Text", "default": "No contract, cancel easily"
+    },
+    {
+      "type": "text", "id": "benefit_4", "label": "Benefit 4 Text", "default": "Out of stock protection"
+    },
+    {
+      "type": "range", "id": "benefit_item_gap", "label": "Gap Between Benefit Items (horizontal)", "min":4,"max":20,"step":1,"unit":"px","default":10
+    },
+    {
+      "type": "range", "id": "benefit_font_size", "label": "Benefit Font Size", "min":10,"max":14,"step":1,"unit":"px","default":12
+    },
+    {
+      "type": "color", "id": "benefit_text_color", "label": "Benefit Text Color", "default":"#555555"
+    },
+    {
+      "type": "color", "id": "benefit_selected_text_color", "label": "Selected Benefit Text Color", "default":"#4A00E0"
+    },
+    {
+      "type": "range", "id": "benefit_checkmark_size", "label": "Checkmark Size", "min":8,"max":16,"step":1,"unit":"px","default":10
+    },
+    {
+      "type": "color", "id": "benefit_checkmark_color", "label": "Checkmark Color", "default":"#555555"
+    },
+    {
+      "type": "color", "id": "benefit_checkmark_selected_color", "label": "Selected Checkmark Color", "default":"#4A00E0"
+    },
     {
       "type": "header",
-      "content": "Flavor Selection Styling"
+      "content": "Flavor Selection"
     },
-    { "type": "color", "id": "flavor_header_bg_color", "label": "Flavor Header BG", "default": "#F8F9FA"},
-    { "type": "range", "id": "flavor_section_title_size", "label": "Section Title Size", "min":16, "max":28, "step":1, "default":18},
-    { "type": "color", "id": "flavor_section_title_color", "label": "Section Title Color", "default": "#000000"},
-    { "type": "range", "id": "flavor_to_go_font_size", "label": "Items To Go Font Size", "min":10, "max":18, "step":1, "default":13},
-    { "type": "color", "id": "flavor_to_go_text_color", "label": "Items To Go Text Color", "default": "#4A00E0"},
-    { "type": "color", "id": "flavor_to_go_bg_color", "label": "Items To Go BG Color", "default": "#E6D9FF"},
-    { "type": "range", "id": "flavor_to_go_border_radius", "label": "Items To Go Border Radius", "min":0, "max":20, "step":1, "default":15},
-    { "type": "range", "id": "flavor_item_gap", "label": "Gap Between Flavor Items", "min":5, "max":30, "step":1, "default":15},
-    { "type": "range", "id": "flavor_item_padding", "label": "Flavor Item Padding", "min":5, "max":30, "step":1, "default":15},
-    { "type": "color", "id": "flavor_item_bg_color", "label": "Flavor Item BG", "default": "#FFFFFF"},
-    { "type": "color", "id": "flavor_item_border_color", "label": "Flavor Item Border", "default": "#EEEEEE"},
-    { "type": "range", "id": "flavor_item_border_radius", "label": "Flavor Item Border Radius", "min":0, "max":20, "step":1, "default":8},
-    { "type": "range", "id": "flavor_img_size", "label": "Flavor Image Size", "min":40, "max":100, "step":5, "default":60},
-    { "type": "range", "id": "flavor_title_size", "label": "Flavor Title Size", "min":14, "max":22, "step":1, "default":16},
-    { "type": "color", "id": "flavor_title_color", "label": "Flavor Title Color", "default": "#333333"},
-    { "type": "range", "id": "flavor_desc_size", "label": "Flavor Description Size", "min":10, "max":16, "step":1, "default":13},
-    { "type": "color", "id": "flavor_desc_color", "label": "Flavor Description Color", "default": "#666666"},
-    { "type": "color", "id": "flavor_qty_btn_bg_color", "label": "Qty +/- BG", "default": "#F1F1F1"},
-    { "type": "color", "id": "flavor_qty_btn_text_color", "label": "Qty +/- Text", "default": "#333333"},
-    { "type": "color", "id": "flavor_qty_btn_border_color", "label": "Qty +/- Border", "default": "#DDDDDD"},
-    { "type": "color", "id": "flavor_add_btn_bg_color", "label": "'Add' Button BG", "default": "#FFFFFF"},
-    { "type": "color", "id": "flavor_add_btn_text_color", "label": "'Add' Button Text", "default": "#4A00E0"},
-    { "type": "color", "id": "flavor_add_btn_border_color", "label": "'Add' Button Border", "default": "#4A00E0"},
-    { "type": "range", "id": "flavor_add_btn_border_radius", "label": "'Add' Button Border Radius", "min":0, "max":20, "step":1, "default":5},
-
+    {
+      "type": "text", "id": "flavors_title", "label": "Flavors Section Title", "default": "SELECT FLAVORS"
+    },
+    {
+      "type": "range", "id": "flavor_header_margin_bottom", "label": "Flavor Header Margin Bottom", "min":5,"max":20,"step":1,"unit":"px","default":10
+    },
+    {
+      "type": "range", "id": "flavors_title_font_size", "label": "Flavors Title Size", "min":14,"max":22,"step":1,"unit":"px","default":16
+    },
+    {
+      "type": "select", "id": "flavors_title_font_weight", "label": "Flavors Title Weight", "options": [{"value": "400", "label": "Normal"}, {"value": "600", "label": "Semi-Bold"}, {"value": "700", "label": "Bold"}], "default": "700"
+    },
+    {
+      "type": "range", "id": "flavor_status_font_size", "label": "Flavor Status Message Size", "min":10,"max":14,"step":1,"unit":"px","default":12
+    },
+    {
+      "type": "color", "id": "error_message_bg_color", "label": "Error Message BG", "default": "#FFEBEE"
+    },
+    {
+      "type": "color", "id": "error_color", "label": "Error Message Text Color", "default": "#D32F2F"
+    },
+    {
+      "type": "color", "id": "info_message_bg_color", "label": "Info Message BG", "default": "#E3F2FD"
+    },
+    {
+      "type": "color", "id": "info_color", "label": "Info Message Text Color", "default": "#1976D2"
+    },
+    {
+      "type": "text", "id": "loading_flavors_text", "label": "Loading Flavors Text", "default": "Loading flavors..."
+    },
+    {
+      "type": "text", "id": "no_flavors_text", "label": "No Flavors Available Text", "default": "No flavors available at this time."
+    },
+    {
+      "type": "text", "id": "skio_error_text", "label": "Skio/Data Error Text", "default": "Could not load flavor options. Please try again later."
+    },
+    {
+      "type": "range", "id": "flavor_card_gap", "label": "Gap Between Flavor Cards", "min":5,"max":20,"step":1,"unit":"px","default":10
+    },
+    {
+      "type": "color", "id": "flavor_card_bg_color", "label": "Flavor Card BG Color", "default": "#FFFFFF"
+    },
+    {
+      "type": "range", "id": "flavor_card_border_radius", "label": "Flavor Card Radius", "min":0,"max":15,"step":1,"unit":"px","default":8
+    },
+    {
+      "type": "range", "id": "flavor_card_padding", "label": "Flavor Card Padding", "min":8,"max":20,"step":1,"unit":"px","default":12
+    },
+    {
+      "type": "range", "id": "flavor_name_font_size", "label": "Flavor Name Size", "min":13,"max":18,"step":1,"unit":"px","default":15
+    },
+    {
+      "type": "select", "id": "flavor_name_font_weight", "label": "Flavor Name Weight", "options": [{"value": "400", "label": "Normal"}, {"value": "600", "label": "Semi-Bold"}, {"value": "700", "label": "Bold"}], "default": "700"
+    },
+    {
+      "type": "range", "id": "flavor_description_font_size", "label": "Flavor Description Size", "min":10,"max":14,"step":1,"unit":"px","default":12
+    },
+    {
+      "type": "text", "id": "default_flavor_description", "label": "Default Flavor Description", "default": "A delicious choice.", "info": "Used if metafield is missing."
+    },
+    {
+      "type": "range", "id": "flavor_controls_width", "label": "Flavor Controls Width", "min":80,"max":150,"step":5,"unit":"px","default":100
+    },
+    {
+      "type": "text", "id": "flavor_add_button_text", "label": "Flavor 'Add' Button Text", "default": "Add +"
+    },
+    {
+      "type": "color", "id": "stepper_button_bg_color", "label": "Stepper Button BG Color", "default":"#F5F5F5"
+    },
+     {
+      "type": "color", "id": "stepper_button_hover_bg_color", "label": "Stepper Button Hover BG", "default":"#E0E0E0"
+    },
+    {
+      "type": "range", "id": "flavor_quantity_font_size", "label": "Flavor Quantity Input Size", "min":12,"max":16,"step":1,"unit":"px","default":14
+    },
     {
       "type": "header",
-      "content": "Summary Section Styling"
+      "content": "Summary & Add to Cart Button"
     },
-    { "type": "range", "id": "summary_padding", "label": "Padding", "min":0, "max":30, "step":1, "default":15},
-    { "type": "color", "id": "summary_bg_color", "label": "Background", "default": "#F8F9FA"},
-    { "type": "color", "id": "summary_border_color", "label": "Border Color", "default": "#E9ECEF"},
-    { "type": "range", "id": "summary_border_radius", "label": "Border Radius", "min":0, "max":20, "step":1, "default":8},
-    { "type": "range", "id": "summary_text_size", "label": "Text Size", "min":12, "max":20, "step":1, "default":16},
-    { "type": "color", "id": "subtotal_label_color", "label": "Subtotal Label Color", "default": "#333333"},
-    { "type": "color", "id": "subtotal_value_color", "label": "Subtotal Value Color", "default": "#000000"},
-    { "type": "color", "id": "savings_text_color", "label": "Savings Text Color", "default": "#28A745"},
-
     {
-      "type": "header",
-      "content": "Add to Cart Button Styling"
+      "type": "text", "id": "subtotal_label", "label": "Subtotal Label", "default": "Subtotal:"
     },
-    { "type": "range", "id": "atc_padding_y", "label": "Padding Y", "min":10, "max":30, "step":1, "default":15},
-    { "type": "range", "id": "atc_padding_x", "label": "Padding X", "min":10, "max":30, "step":1, "default":20},
-    { "type": "range", "id": "atc_font_size", "label": "Font Size", "min":14, "max":24, "step":1, "default":18},
-    { "type": "range", "id": "atc_border_radius", "label": "Border Radius", "min":0, "max":30, "step":1, "default":8},
-    { "type": "color", "id": "atc_bg_color", "label": "Background (Enabled)", "default": "#4A00E0"},
-    { "type": "color", "id": "atc_text_color", "label": "Text Color (Enabled)", "default": "#FFFFFF"},
-    { "type": "color", "id": "atc_bg_disabled_color", "label": "Background (Disabled)", "default": "#E0E0E0"},
-    { "type": "color", "id": "atc_text_disabled_color", "label": "Text Color (Disabled)", "default": "#9E9E9E"},
-
     {
-      "type": "header",
-      "content": "Modal Styling"
+      "type": "text", "id": "savings_text_prefix", "label": "Savings Text Prefix", "default": "You're saving "
     },
-    { "type": "color", "id": "modal_overlay_color", "label": "Overlay BG", "default": "rgba(0,0,0,0.6)"},
-    { "type": "color", "id": "modal_bg_color", "label": "Content BG", "default": "#FFFFFF"},
-    { "type": "color", "id": "modal_text_color", "label": "Content Text", "default": "#333333"},
-    { "type": "range", "id": "modal_padding", "label": "Content Padding", "min":10, "max":50, "step":1, "default":30},
-    { "type": "color", "id": "modal_border_color", "label": "Content Border", "default": "#DDDDDD"},
-    { "type": "range", "id": "modal_border_radius", "label": "Content Border Radius", "min":0, "max":20, "step":1, "default":10},
-    { "type": "range", "id": "modal_max_width", "label": "Max Width", "min":300, "max":800, "step":10, "default":600},
-    { "type": "color", "id": "modal_close_btn_color", "label": "Close Button Color", "default": "#AAAAAA"},
-    { "type": "range", "id": "modal_main_title_size", "label": "Product Title Size", "min":18, "max":32, "step":1, "default":24},
-    { "type": "color", "id": "modal_main_title_color", "label": "Product Title Color", "default": "#333333"},
-    { "type": "range", "id": "modal_flavor_title_size", "label": "Flavor Title Size", "min":16, "max":28, "step":1, "default":20},
-    { "type": "color", "id": "modal_flavor_title_color", "label": "Flavor Title Color", "default": "#000000"},
-    { "type": "range", "id": "modal_desc_size", "label": "Description Size", "min":12, "max":18, "step":1, "default":14},
-    { "type": "color", "id": "modal_desc_color", "label": "Description Color", "default": "#555555"},
-    { "type": "header", "content": "Modal Badge Styling"},
-    { "type": "color", "id": "badge_font_color", "label": "Font Color", "default": "#FFFFFF"},
-    { "type": "range", "id": "badge_font_size", "label": "Font Size", "min":8, "max":16, "step":1, "default":12},
-    { "type": "range", "id": "badge_border_radius", "label": "Border Radius", "min":0, "max":20, "step":1, "default":12},
-    { "type": "color", "id": "badge_1_bg_color", "label": "Badge 1 BG (Metafield Fallback)", "default": "#4A90E2"},
-    { "type": "color", "id": "badge_2_bg_color", "label": "Badge 2 BG (Metafield Fallback)", "default": "#50E3C2"},
-    { "type": "color", "id": "badge_3_bg_color", "label": "Badge 3 BG (Configurable)", "default": "#F5A623"},
-    { "type": "header", "content": "Modal Accordion Styling"},
-    { "type": "color", "id": "accordion_border_color", "label": "Border Color", "default": "#DDDDDD"},
-    { "type": "range", "id": "accordion_border_radius", "label": "Border Radius", "min":0, "max":10, "step":1, "default":5},
-    { "type": "color", "id": "accordion_header_bg_color", "label": "Header BG", "default": "#F9F9F9"},
-    { "type": "color", "id": "accordion_header_text_color", "label": "Header Text", "default": "#333333"},
-    { "type": "color", "id": "accordion_content_bg_color", "label": "Content BG", "default": "#FFFFFF"},
-    { "type": "color", "id": "accordion_content_text_color", "label": "Content Text", "default": "#333333"}
+    {
+      "type": "range", "id": "summary_font_size", "label": "Summary Font Size", "min":12,"max":18,"step":1,"unit":"px","default":14
+    },
+    {
+      "type": "color", "id": "savings_badge_bg_color", "label": "Savings Badge BG", "default": "#E8F5E9"
+    },
+    {
+      "type": "color", "id": "savings_badge_text_color", "label": "Savings Badge Text Color", "default": "#2E7D32"
+    },
+    {
+      "type": "range", "id": "savings_badge_padding_y", "label": "Savings Badge Padding Y", "min":2,"max":10,"step":1,"unit":"px","default":4
+    },
+    {
+      "type": "range", "id": "savings_badge_padding_x", "label": "Savings Badge Padding X", "min":5,"max":15,"step":1,"unit":"px","default":8
+    },
+    {
+      "type": "range", "id": "savings_badge_border_radius", "label": "Savings Badge Radius", "min":0,"max":10,"step":1,"unit":"px","default":4
+    },
+    {
+      "type": "text", "id": "atc_default_text", "label": "ATC Button Default Text", "default": "SELECT FLAVORS"
+    },
+    {
+      "type": "text", "id": "atc_select_more_text", "label": "ATC Button 'Select More' Text", "default": "SELECT {count} MORE BAG{s}", "info":"Use {count} and {s} for dynamic values."
+    },
+    {
+      "type": "text", "id": "atc_ready_text", "label": "ATC Button Ready Text", "default": "ADD TO CART"
+    },
+    {
+      "type": "text", "id": "atc_adding_text", "label": "ATC Button Adding Text", "default": "ADDING..."
+    },
+    {
+      "type": "text", "id": "atc_success_text", "label": "ATC Button Success Text", "default": "ADDED!"
+    },
+    {
+      "type": "text", "id": "atc_error_text", "label": "ATC Button Error Text", "default": "ERROR - TRY AGAIN"
+    },
+    {
+      "type": "text", "id": "status_more_to_go_text", "label": "Flavor Status 'More to Go'", "default": "{count} Flavor{s} to Go", "info":"Use {count} and {s}."
+    },
+    {
+      "type": "text", "id": "status_all_set_text", "label": "Flavor Status 'All Set'", "default": "All Set!"
+    },
+    {
+      "type": "text", "id": "status_can_add_more_text", "label": "Flavor Status 'Can Add More'", "default": "All Set! (You can add more)"
+    },
+    {
+      "type": "color", "id": "primary_color", "label": "Primary Action Color", "default": "#673AB7"
+    },
+    {
+      "type": "color", "id": "primary_color_hover", "label": "Primary Action Color (Hover)", "default": "#512DA8"
+    },
+    {
+      "type": "color", "id": "primary_text_color", "label": "Text on Primary Action Color", "default": "#FFFFFF"
+    },
+    {
+      "type": "color", "id": "secondary_color", "label": "Secondary Action Color", "default": "#CDDC39"
+    },
+    {
+      "type": "range", "id": "button_border_radius", "label": "General Button Radius", "min":0,"max":20,"step":1,"unit":"px","default":6
+    },
+    {
+      "type": "range", "id": "small_button_padding_y", "label": "Small Button Padding Y", "min":5,"max":15,"step":1,"unit":"px","default":8
+    },
+    {
+      "type": "range", "id": "small_button_padding_x", "label": "Small Button Padding X", "min":8,"max":20,"step":1,"unit":"px","default":12
+    },
+    {
+      "type": "range", "id": "small_button_font_size", "label": "Small Button Font Size", "min":12,"max":16,"step":1,"unit":"px","default":14
+    },
+    {
+      "type": "range", "id": "atc_button_padding_y", "label": "ATC Button Padding Y", "min":10,"max":25,"step":1,"unit":"px","default":12
+    },
+    {
+      "type": "range", "id": "atc_button_padding_x", "label": "ATC Button Padding X", "min":15,"max":30,"step":1,"unit":"px","default":20
+    },
+    {
+      "type": "range", "id": "atc_button_font_size", "label": "ATC Button Font Size", "min":14,"max":20,"step":1,"unit":"px","default":16
+    },
+    {
+      "type": "select", "id": "atc_button_font_weight", "label": "ATC Button Font Weight", "options": [{"value": "400", "label": "Normal"}, {"value": "600", "label": "Semi-Bold"}, {"value": "700", "label": "Bold"}], "default": "700"
+    },
+    {
+      "type": "color", "id": "button_disabled_bg_color", "label": "Disabled Button BG Color", "default": "#BDBDBD"
+    },
+    {
+      "type": "color", "id": "button_disabled_text_color", "label": "Disabled Button Text Color", "default": "#757575"
+    }
   ],
   "presets": [
     {
-      "name": "Skio Dynamic Box"
+      "name": "Build-a-Box Form"
     }
   ]
 }
