@@ -304,8 +304,8 @@
               "settings": {
                 "main_product_for_skio": "{{ closest.product.metafields.custom.build_a_box_product.value }}",
                 "collection_for_flavor_metafields": "clear-protein",
-                "default_bag_count": 3,
-                "redirect_to_cart": false,
+                "default_bag_count": 4,
+                "redirect_to_cart": true,
                 "background_color": "#ffffff",
                 "block_padding": 20,
                 "block_border_radius": 8,
