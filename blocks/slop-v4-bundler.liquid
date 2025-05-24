@@ -76,8 +76,8 @@
   assign nutritional_info_metafield_key = block.settings.nutritional_info_metafield | split: '.' | last | default: "nutritional_information"
 
   assign bag_label_singular = block.settings.bag_label
-  assign bag_label_plural = block.settings.bag_label | append: 's' 
-  if block.settings.bag_label == "Bag" 
+  assign bag_label_plural = block.settings.bag_label | append: 's'
+  if block.settings.bag_label == "Bag"
     assign bag_label_plural = "Bags"
   endif
 
@@ -1306,7 +1306,7 @@ customElements.define('product-form-replacement-{{ rob_custom }}', ProductFormRe
       "step": 2,
       "unit": "px",
       "label": "Horizontal Padding (Left/Right)",
-      "default": 10
+      "default": 16
     },
     {
       "type": "range",
@@ -1316,7 +1316,7 @@ customElements.define('product-form-replacement-{{ rob_custom }}', ProductFormRe
       "step": 2,
       "unit": "px",
       "label": "Mobile Vertical Padding",
-      "default": 10
+      "default": 16
     },
     {
       "type": "range",
