@@ -41,7 +41,7 @@
   - At least one preset.
 {%- enddoc -%}
 
-{% assign rob_custom = block.id | replace: '_', '' | downcase %}
+{% assign rob_custom = block.id | replace: '_', '' | replace: '-', '' | downcase %}
 
 {% comment %} Global Liquid Logic Start {% endcomment %}
 {%- liquid
