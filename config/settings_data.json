@@ -11,7 +11,7 @@
   "current": {
     "logo": "shopify://shop_images/dailies-primary_logo_green.svg",
     "logo_inverse": "shopify://shop_images/dailies-primary_logo_white.svg",
-    "favicon": "shopify://shop_images/dailies_-_initial_-_white.svg",
+    "favicon": "{{ shop.brand.square_logo }}",
     "type_body_font": "liter_n4",
     "type_subheading_font": "liter_n4",
     "type_heading_font": "liter_n4",
@@ -59,7 +59,7 @@
       "scheme-1": {
         "settings": {
           "background": "#fffaf7",
-          "foreground_heading": "#000000",
+          "foreground_heading": "#761e0b",
           "foreground": "#761e0bbd",
           "primary": "#761e0b",
           "primary_hover": "#ff4315",
