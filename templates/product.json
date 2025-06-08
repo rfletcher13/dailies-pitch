@@ -104,7 +104,7 @@
                 "padding-inline-end": 0
               },
               "blocks": {
-                "review_pzw7fn": {
+                "review_AY6CcQ": {
                   "type": "review",
                   "settings": {
                     "product": "{{ closest.product }}",
@@ -173,8 +173,8 @@
                   "settings": {
                     "product": "{{ closest.product }}",
                     "show_sale_price_first": true,
-                    "show_installments": true,
-                    "show_tax_info": true,
+                    "show_installments": false,
+                    "show_tax_info": false,
                     "type_preset": "h6",
                     "width": "100%",
                     "alignment": "left",
@@ -193,7 +193,7 @@
                 }
               },
               "block_order": [
-                "review_pzw7fn",
+                "review_AY6CcQ",
                 "text_DQhnJA",
                 "text_f4b8Gn",
                 "price_XqcpTF"
@@ -277,12 +277,13 @@
                       "static": true,
                       "settings": {
                         "product": "{{ closest.product }}",
-                        "style_class": "button-secondary"
+                        "style_class": "button"
                       },
                       "blocks": {}
                     },
                     "accelerated-checkout": {
                       "type": "accelerated-checkout",
+                      "disabled": true,
                       "static": true,
                       "settings": {
                         "product": "{{ closest.product }}"
@@ -302,7 +303,7 @@
               "type": "text",
               "name": "Product description",
               "settings": {
-                "text": "<p>{{ closest.product.description }}</p>",
+                "text": "{{ closest.product.description }}",
                 "width": "100%",
                 "max_width": "normal",
                 "alignment": "left",
