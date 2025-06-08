@@ -259,7 +259,7 @@
                     "start_onetime": "false",
                     "onetime_first": "true",
                     "default_subscription": "",
-                    "group_border_radius": 4,
+                    "group_border_radius": 6,
                     "group_border_shadow": true,
                     "group_border_selected_color": "#2d9b5c",
                     "onetime_title": "One Time",
