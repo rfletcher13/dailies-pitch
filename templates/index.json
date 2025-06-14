@@ -6,7 +6,8 @@
  * or related systems. Please exercise caution as any changes
  * made to this file may be overwritten.
  * ------------------------------------------------------------
- */{
+ */
+{
   "sections": {
     "section_AWGGzG": {
       "type": "section",
@@ -15,6 +16,7 @@
           "type": "group",
           "name": "Group",
           "settings": {
+            "link": "",
             "open_in_new_tab": false,
             "content_direction": "column",
             "vertical_on_mobile": true,
@@ -52,6 +54,7 @@
             "logo_G9zfEc": {
               "type": "logo",
               "name": "t:names.logo",
+              "disabled": true,
               "settings": {
                 "inverse": false,
                 "font": "accent",
@@ -73,6 +76,7 @@
               "type": "group",
               "name": "Group",
               "settings": {
+                "link": "",
                 "open_in_new_tab": false,
                 "content_direction": "row",
                 "vertical_on_mobile": true,
@@ -212,6 +216,7 @@
           "static": true,
           "settings": {
             "media_type": "image",
+            "link": "",
             "video_loop": true,
             "video_autoplay": false,
             "image_position": "cover",
@@ -306,6 +311,7 @@
           "static": true,
           "settings": {
             "media_type": "image",
+            "link": "",
             "video_loop": true,
             "video_autoplay": false,
             "image_position": "cover",
@@ -514,6 +520,7 @@
             "group_DxPy8c": {
               "type": "group",
               "settings": {
+                "link": "",
                 "open_in_new_tab": false,
                 "content_direction": "column",
                 "vertical_on_mobile": true,
@@ -627,7 +634,7 @@
       },
       "name": "t:names.products_carousel",
       "settings": {
-        "collection": "all",
+        "collection": "electrolytes",
         "layout_type": "carousel",
         "carousel_on_mobile": false,
         "max_products": 8,
@@ -652,6 +659,7 @@
           "type": "group",
           "name": "First collection",
           "settings": {
+            "link": "",
             "open_in_new_tab": false,
             "content_direction": "column",
             "vertical_on_mobile": true,
@@ -690,6 +698,7 @@
               "type": "image",
               "name": "t:names.image",
               "settings": {
+                "link": "",
                 "image_ratio": "adapt",
                 "width": "custom",
                 "custom_width": 75,
@@ -743,6 +752,7 @@
           "type": "group",
           "name": "Second collection",
           "settings": {
+            "link": "",
             "open_in_new_tab": false,
             "content_direction": "column",
             "vertical_on_mobile": true,
@@ -781,6 +791,7 @@
               "type": "image",
               "name": "t:names.image",
               "settings": {
+                "link": "",
                 "image_ratio": "adapt",
                 "width": "custom",
                 "custom_width": 75,
