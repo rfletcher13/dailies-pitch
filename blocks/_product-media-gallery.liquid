@@ -1,4 +1,17 @@
-
+{% comment %}
+  MODIFICATIONS:
+  1. Added `data-media-alt` attributes to various media elements.
+     - In the `slides` capture, the `attributes` for `slideshow-slide` now include `data-media-alt`.
+     - For grid layout `<li>` items.
+     - For zoom dialog thumbnails (`<button>`).
+     - For zoom dialog main image `<li>` items.
+  2. Added a new `<script>` block at the end for the filtering logic.
+  3. Added a CSS class `.media-item-hidden` in the stylesheet.
+  4. Assumes `block.shopify_attributes` adds an `id="block-{{block.id}}"` (or similar unique ID) to the `media-gallery` tag or its immediate wrapper.
+     The JavaScript will use `const mediaGallery = document.getElementById('block-{{ block.id }}');`
+     If `block.shopify_attributes` is on a wrapper, the JS query for `mediaGallery` might need to be `wrapper.querySelector('media-gallery')`.
+     For simplicity, this solution assumes `block.shopify_attributes` is on the `media-gallery` element itself or that `media-gallery` is the root element identified by `block-{{block.id}}`.
+{% endcomment %}
 
 {% stylesheet %}
   .dialog-zoomed-gallery {
@@ -19,7 +32,6 @@
 
   @media screen and (width < 750px) {
     .dialog-zoomed-gallery {
-      /* Prevent scroll wheel or swipe scrolling */
       overscroll-behavior: none;
       scrollbar-width: none;
       display: flex;
@@ -123,8 +135,12 @@
   }
 
   .dialog-zoomed-gallery .product-media-container--model .product-media__image {
-    /* Make the height match the height of the model-viewer */
     height: 100vh;
+  }
+
+  /* Added for JS functionality to hide/show media items */
+  .media-item-hidden {
+    display: none !important;
   }
 {% endstylesheet %}
 
@@ -167,7 +183,6 @@
   endif
 
   assign slideshow_controls_style = block.settings.slideshow_controls_style
-  # Use a counter instead of dots when there are many images to avoid cropping/overflow.
   if slideshow_controls_style == 'dots' and selected_product.media.size > 15
     assign slideshow_controls_style = 'counter'
   endif
@@ -190,14 +205,12 @@
     assign pagination_position = 'center'
   endif
 
-  # correct discrepancy between position settings for thumbnails and other controls
   if pagination_position == 'bottom'
     assign pagination_position = 'center'
   endif
 
   assign icons_position = 'center'
 
-  # Put the icons on the opposite side of the pagination controls
   if block.settings.slideshow_controls_position == 'on_media'
     if pagination_position == 'left'
       assign icons_position = 'right'
@@ -207,13 +220,6 @@
   endif
 -%}
 
-{%- comment -%}
-  This is very inefficient because:
-  - we iterate product.media for each `| where` clause inside of a `for media in media` loop
-  - we also iterate `variant_images` inside of a `for media in media` loop if hiding other variant images
-
-  I'm doing this because we can/should use it to demonstrate that we should improve the liquid api by either adding this as a new filter to product.media OR by adding functionality to add objects to arrays in liquid.
-{%- endcomment -%}
 {%- liquid
   assign sorted_media = '' | split: ','
   if selected_variant_media
@@ -234,6 +240,7 @@
   endif
   assign has_image_drop = sorted_media | has: 'media_type', 'image'
 -%}
+
 {%- if has_image_drop -%}
   <script
     src="{{ 'drag-zoom-wrapper.js' | asset_url }}"
@@ -268,18 +275,16 @@
   style="{% render 'spacing-style', settings: block.settings %} --thumbnail-width: {{ block.settings.thumbnail_width }}px; --media-radius: {{ block.settings.media_radius }}px;{% if block.settings.icons_style contains 'large' %} --slideshow-icon-padding: 0;{% endif %}--image-gap: {{ block.settings.image_gap }}px;"
   data-presentation="{{ block.settings.media_presentation }}"
   {{ block.shopify_attributes }}
+  {#
+  This
+  will
+  typically
+  add
+  id="block-{{block.id}}"
+  or
+  similar
+  #}
 >
-  {%- comment -%}
-    TODO skiplink
-
-    TODO add preview icon https://github.com/Shopify/dawn/blob/3f4284a1284c7c2bf3708a2f9f3c5a3bd69d0597/snippets/product-thumbnail.liquid#L60-L74
-
-    TODO Dawn had a spinner here, why? https://github.com/Shopify/dawn/blob/3f4284a1284c7c2bf3708a2f9f3c5a3bd69d0597/snippets/product-thumbnail.liquid#L75
-
-    TODO lightbox opener
-
-    Look at slideshow.liquid for additional classes and data attributes to support autoplay, fixed heights, full width
-  {%- endcomment -%}
   {% capture slides %}
     {% for media in sorted_media %}
       {% capture children %}
@@ -293,18 +298,28 @@
           --media-preview-ratio: {{ media.preview_image.aspect_ratio | default: 1.0 }};
         {% endcapture %}
       {% endif %}
-      {% if block.settings.zoom and media.media_type == 'model' %}
-        {%- capture attributes -%}"{% if settings.transition_to_main_product and forloop.first %} data-view-transition-type="product-image-transition"{% endif %}{% endcapture -%}
-      {% elsif block.settings.zoom %}
-        {%- capture attributes -%}on:click="#zoom-dialog-{{ block.id }}/open/{{ forloop.index0 }}"{% if settings.transition_to_main_product and forloop.first %} data-view-transition-type="product-image-transition"{% endif %}{% endcapture -%}
+
+      {%- comment -%} MODIFICATION: Add data-media-alt to attributes {%- endcomment -%}
+      {%- capture media_alt_attr -%}data-media-alt="{{ media.alt | escape | downcase }}"{%- endcapture -%}
+      {%- assign existing_attributes = "" -%}
+      {%- if block.settings.zoom and media.media_type == 'model' -%}
+        {%- if settings.transition_to_main_product and forloop.first %}
+          {%- assign existing_attributes = 'data-view-transition-type="product-image-transition"' -%}
+        {%- endif -%}
+      {% elsif block.settings.zoom -%}
+        {%- assign existing_attributes = 'on:click="#zoom-dialog-' | append: block.id | append: '/open/' | append: forloop.index0 | append: '"' -%}
+        {%- if settings.transition_to_main_product and forloop.first %}
+          {%- assign existing_attributes = existing_attributes | append: ' data-view-transition-type="product-image-transition"' -%}
+        {%- endif -%}
       {% endif %}
+      {%- capture attributes -%}{{ media_alt_attr }} {{ existing_attributes }}{%- endcapture -%}
 
       {% render 'slideshow-slide',
         index: forloop.index,
         children: children,
         class: class,
         style: style,
-        attributes: attributes,
+        attributes: attributes
       %}
     {% endfor %}
   {% endcapture %}
@@ -369,6 +384,7 @@
             {%- if block.settings.aspect_ratio != 'adapt' %} media-fit{% endif %}
           "
           style="{% if block.settings.aspect_ratio == 'adapt' %} --media-preview-ratio: {{ media.preview_image.aspect_ratio | default: 1.0 }};{% endif %}"
+          data-media-alt="{{ media.alt | escape | downcase }}"
           {% if settings.transition_to_main_product and forloop.first %}
             data-view-transition-type="product-image-transition"
           {% endif %}
@@ -383,9 +399,6 @@
               <span class="visually-hidden">{{ 'actions.open_image_in_full_screen' | t }}</span>
             </button>
           {%- endif -%}
-          {%- comment -%}
-            TODO aria-hidden should only be applied if we are on a mobile view for Grid, or always for a carousel
-          {%- endcomment -%}
           {%- render 'product-media', media: media -%}
         </li>
       {% endfor %}
@@ -431,6 +444,7 @@
                   on:click="/handleThumbnailClick/{{ forloop.index0 }}"
                   on:pointerenter="/handleThumbnailPointerEnter/{{ forloop.index0 }}"
                   style="--aspect-ratio: {{ aspect_ratio }}; --gallery-aspect-ratio: {{ aspect_ratio }};"
+                  data-media-alt="{{ media.alt | escape | downcase }}"
                   {% if forloop.first %}
                     aria-selected="true"
                   {% endif %}
@@ -465,11 +479,11 @@
               "
               style="{% if block.settings.aspect_ratio == 'adapt' %} --media-preview-ratio: {{ media.preview_image.aspect_ratio | default: 1.0 }};{% endif %}"
               ref="media[]"
+              data-media-alt="{{ media.alt | escape | downcase }}"
               {% if media.media_type == 'image' %}
                 on:click="/close"
               {% endif %}
             >
-              {% # TODO aria-hidden should only be applied if we are on a mobile view for Grid, or always for a carousel %}
               {% if media.media_type == 'image' %}
                 <drag-zoom-wrapper class="product-media__drag-zoom-wrapper">
                   {%- render 'product-media', media: media -%}
@@ -503,15 +517,12 @@
             },
           ]);
         },
-
         setupShopifyXR(errors) {
           if (errors) return;
-
           if (!window.ShopifyXR) {
             document.addEventListener('shopify_xr_initialized', () => this.setupShopifyXR());
             return;
           }
-
           document.querySelectorAll('[id^="ProductModelJSON-"]').forEach((modelJSON) => {
             window.ShopifyXR.addModels(JSON.parse(modelJSON.textContent));
             modelJSON.remove();
@@ -519,11 +530,117 @@
           window.ShopifyXR.setupXRElements();
         },
       };
-
       window.ProductModel.loadShopifyXR();
     </script>
   {%- endif -%}
 </media-gallery>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    // Attempt to get the media gallery element using the ID set by block.shopify_attributes
+    // This assumes block.shopify_attributes sets an ID like "block-{{block.id}}"
+    const mediaGallery = document.getElementById('block-{{ block.id }}');
+
+    if (!mediaGallery) {
+      console.error('Media gallery element with ID "block-{{ block.id }}" not found for flavor filtering.');
+      return;
+    }
+
+    const productForm = mediaGallery.closest('form[action^="/cart/add"], form.product-form');
+    
+    function getSelectedFlavorValue() {
+      if (!productForm) return null;
+      let flavorValue = null;
+      const optionInputs = productForm.querySelectorAll('select, input[type="radio"]');
+
+      for (const input of optionInputs) {
+        let inputNameAttribute = input.getAttribute('name');
+        let inputName = inputNameAttribute ? inputNameAttribute.toLowerCase() : '';
+        let labelText = '';
+        if (input.id) {
+          const label = productForm.querySelector(`label[for="${input.id}"]`);
+          if (label) {
+            labelText = label.textContent.trim().toLowerCase();
+          }
+        }
+        
+        const dataOptionName = input.dataset.optionName ? input.dataset.optionName.toLowerCase() : '';
+
+        if (inputName.includes('[flavor]') || labelText === 'flavor' || dataOptionName === 'flavor') {
+          if (input.tagName === 'SELECT') {
+            flavorValue = input.value;
+            break; 
+          } else if (input.type === 'radio') {
+            if (input.checked) {
+              flavorValue = input.value;
+              break;
+            }
+          }
+        }
+      }
+      return flavorValue;
+    }
+
+    function formatFlavorForSearch(flavor) {
+      if (!flavor || typeof flavor !== 'string') return '';
+      return flavor.replace(/\s+/g, '-').toLowerCase();
+    }
+
+    function updateMediaVisibility() {
+      const selectedFlavor = getSelectedFlavorValue();
+      const searchTerm = formatFlavorForSearch(selectedFlavor);
+
+      const itemsToFilter = [
+        ...mediaGallery.querySelectorAll('.slideshow-slide'),
+        ...mediaGallery.querySelectorAll('.media-gallery__grid > li'),
+      ];
+      
+      const zoomDialog = mediaGallery.querySelector('zoom-dialog');
+      if (zoomDialog) {
+        itemsToFilter.push(...zoomDialog.querySelectorAll('.dialog-thumbnails-list__thumbnail'));
+        itemsToFilter.push(...zoomDialog.querySelectorAll('.dialog-zoomed-gallery > li'));
+      }
+      
+      let visibleMediaCount = 0;
+      itemsToFilter.forEach(item => {
+        const mediaAlt = item.dataset.mediaAlt || ''; 
+
+        if (!searchTerm || mediaAlt.includes(searchTerm)) {
+          item.classList.remove('media-item-hidden');
+          visibleMediaCount++;
+        } else {
+          item.classList.add('media-item-hidden');
+        }
+      });
+      
+      // Optional: Trigger update for slideshows or other components that depend on visible items
+      // This is highly theme/component specific.
+      // e.g., if using Flickity: Flickity.data(mediaGallery.querySelector('.flickity-enabled'))?.resize();
+      // e.g., if slideshow component has an update method:
+      // const slideshowComponent = mediaGallery.querySelector('slideshow-component'); // Or appropriate selector
+      // if (slideshowComponent && typeof slideshowComponent.update === 'function') {
+      //   slideshowComponent.update();
+      // }
+    }
+
+    if (productForm) {
+      productForm.addEventListener('change', (event) => {
+        // Filter for option selectors to avoid reacting to other form changes.
+        if (event.target.matches('select[name*="options["], input[type="radio"][name*="options["]')) {
+          setTimeout(updateMediaVisibility, 50); // Delay to allow other scripts to process
+        }
+      });
+      // Listen for Shopify's common variant change event (emitted by some themes/JS)
+      productForm.addEventListener('variant:change', () => {
+         setTimeout(updateMediaVisibility, 50);
+      });
+    } else {
+      console.warn('Product form not found relative to media gallery. Flavor filtering on variant change may not work.');
+    }
+
+    setTimeout(updateMediaVisibility, 100); // Initial filter application
+  });
+</script>
 
 {% schema %}
 {
